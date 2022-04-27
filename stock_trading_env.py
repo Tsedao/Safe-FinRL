@@ -91,7 +91,7 @@ class StockTradingSim(object):
             action - (num_stock, ) ranging in [-h_max, h_max]
             balance - (1, ),       t-th balance
             shares - (num_stock,) t-th holding position for each asset
-            prices - (num_stock, 2) t-th time of buying (ask) price and selling (bid) price
+            prices - (num_stock, 2) t-th time of selling (bid) price and buying (ask) price
             next_prices - (num_stock, 2) t+1-th time of buying (ask) price and selling (bid) price
 
         Return:
@@ -108,8 +108,8 @@ class StockTradingSim(object):
         assert action.shape == self.shares.shape
 
         # calculate initial wealth before action at time t
-        initial_total_assets = self.balance + sum(s * p for s, p in zip(self.shares,price[:,1]) if s >= 0) + \
-                                            sum(s * p for s, p in zip(self.shares,price[:,0]) if s < 0)
+        initial_total_assets = self.balance + sum(s * p for s, p in zip(self.shares,price[:,0]) if s >= 0) + \
+                                            sum(s * p for s, p in zip(self.shares,price[:,1]) if s < 0)
 
         argsort_actions = np.argsort(action)
         sell_index = argsort_actions[: np.where(action < 0)[0].shape[0]]
@@ -126,8 +126,8 @@ class StockTradingSim(object):
             buy_position, long_position = self._do_long_normal(action, price, index)
 
         # calculate updated wealth after action at time t + 1
-        updated_total_assets = self.balance + sum(s * p for s, p in zip(self.shares,next_price[:,1]) if s>=0) + \
-                                                sum(s * p for s, p in zip(self.shares,next_price[:,0]) if s<0)
+        updated_total_assets = self.balance + sum(s * p for s, p in zip(self.shares,next_price[:,0]) if s>=0) + \
+                                                sum(s * p for s, p in zip(self.shares,next_price[:,1]) if s<0)
 
         reward = np.log(updated_total_assets / initial_total_assets)
 
@@ -166,7 +166,7 @@ class StockTradingSim(object):
 
         action_unit = np.array(action) // np.array(self.unit)
         action = action_unit * self.unit
-        # price 0: buying price 1: selling price
+        # price 0: selling price 1: buying price
         max_unit  = (self.balance / (price[index,0]* (1 + self.trading_cost))) // self.unit
         max_share = max_unit * self.unit
         action = -min(max_share,abs(action))
@@ -183,8 +183,8 @@ class StockTradingSim(object):
 
         #
 
-        sell_amount = price[index,1] * (sell_position) * (1- self.trading_cost)         # sell the current position
-        short_amount = price[index,1] * (short_position) * (1- self.trading_cost)       # sell the broker's position
+        sell_amount = price[index,0] * (sell_position) * (1- self.trading_cost)         # sell the current position
+        short_amount = price[index,0] * (short_position) * (1- self.trading_cost)       # sell the broker's position
         # update balance
         self.balance += sell_amount
         self.balance += short_amount
@@ -220,8 +220,8 @@ class StockTradingSim(object):
         #                                                                                         long_position,
         #                                                                                         self.shares[index]))
 
-        long_amount = price[index,0] * (long_position) * (1 + self.trading_cost)     # buy the broker's positions back
-        buy_amount = price[index,0] * (buy_position) *  (1 + self.trading_cost)      #  buy us extra positions
+        long_amount = price[index,1] * (long_position) * (1 + self.trading_cost)     # buy the broker's positions back
+        buy_amount = price[index,1] * (buy_position) *  (1 + self.trading_cost)      #  buy us extra positions
 
         self.balance -= long_amount
         self.balance -= buy_amount
@@ -351,7 +351,7 @@ class StockTradingEnv(gym.Env):
         ## obs (aseet_num, look_back, feature)
         price = obs[:,-1,-2:]
         next_price = ground_truth_obs[:,0,-2:]
-
+        # 0 sell 1 sell
         market_gain = next_price[:,-1] / price[:,-1]
 
         action = action * self.h_max
