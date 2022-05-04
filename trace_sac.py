@@ -333,7 +333,7 @@ class SAC(object):
         if not os.path.exists('checkpoints/'):
             os.makedirs('checkpoints/')
         if ckpt_path is None:
-            ckpt_path = "checkpoints/{}_sac_checkpoint_{}_{}".format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
+            ckpt_path = "checkpoints/{}_sac_checkpoint_{}".format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
                                                                         suffix)
         print('Saving models to {}'.format(ckpt_path))
         torch.save({'policy_state_dict': self.policy.state_dict(),

@@ -56,7 +56,7 @@ if __name__ == '__main__':
     parser.add_argument('--replay_size', type=int, default=100000)
     parser.add_argument('--cuda',type=str2bool,nargs='?',default=False)
 
-    parser.add_argument('--lr_actor', type = float, default = 0.003)
+    parser.add_argument('--lr_actor', type = float, default = 0.001)
     parser.add_argument('--lr_critic', type = float, default = 0.0003)
     parser.add_argument('--lr_alpha', type = float, default = 0.003)
     parser.add_argument('--nsteps', type=int, default=60)
