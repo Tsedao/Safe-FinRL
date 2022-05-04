@@ -2,7 +2,7 @@
 
 This is the open source implementation of a few important multi-step deep RL algorithms
 discussed in the [ICML 2021 paper](https://arxiv.org/abs/2103.00107). We implement these
-algorithms by Pytorch and mainly in combination with [TD3](https://arxiv.org/abs/1802.09477) and [SAC](https://arxiv.org/abs/1801.01290), and actor-critic algorithms for continuous control.
+algorithms by Pytorch and mainly in combination with [TD3](https://arxiv.org/abs/1802.09477) and [SAC](https://arxiv.org/abs/1801.01290), which are currently popular actor-critic algorithms for continuous control.
 Moreover, we apply the multi-step deep RL algorithms to the Financial Environment inspired by
 [FinRL](https://github.com/AI4Finance-Foundation/FinRL)
 
@@ -71,7 +71,7 @@ python trace_main.py --policy_type [str] \
                      --lr_critic   [int] \
                      --lr_alpha    [int] \
                      --episodes    [int] \
-                     --reps        [int] 
+                     --reps        [int]
 ```
 
 Finally, we suggest using tensorboard to visualize the loss during training by
