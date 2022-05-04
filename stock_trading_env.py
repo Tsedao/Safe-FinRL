@@ -130,10 +130,11 @@ class StockTradingSim(object):
         updated_total_assets = self.balance + sum(s * p for s, p in zip(self.shares,next_price[:,0]) if s>=0) + \
                                                 sum(s * p for s, p in zip(self.shares,next_price[:,1]) if s<0)
 
-        reward = math.log(updated_total_assets / initial_total_assets) if updated_total_assets >= 0 else -1
+        reward = math.log(updated_total_assets / initial_total_assets) if updated_total_assets > 0 and initial_total_assets > 0 else -1
 
 
-        return self.balance, self.shares, reward, updated_total_assets
+
+        return self.balance.copy(), self.shares.copy(), reward, updated_total_assets
 
     def _do_sell_normal(self, action, price, index):
         action = action[index]

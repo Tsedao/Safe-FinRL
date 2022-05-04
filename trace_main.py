@@ -42,13 +42,14 @@ if __name__ == '__main__':
     parser.add_argument('--gamma', type=float, default=0.99)
     parser.add_argument('--tau', type=float, default=0.005)
     parser.add_argument('--seed', '-s', type=int, default=123)
-    parser.add_argument('--episodes', type=int, default=50)
+    parser.add_argument('--episodes', type=int, default=100)
     parser.add_argument('--updates_per_step', type=int, default=1)               # how many times to update in one step in env
     parser.add_argument('--target_update_interval', type=int, default = 1)       # how often to update the target value network
     parser.add_argument('--policy_delay', type=int, default = 1)                 # how often to update the policy network
 
     parser.add_argument('--policy_type', type=str, default='Gaussian')           # includes ["Gaussian", "Deterministic"]
     parser.add_argument('--trace_type', type=str, default='retrace')             # includes ['retrace','q_lambda', 'tree_backup','IS']
+    parser.add_argument('--model_type', type=str, default='lstm')
     parser.add_argument('--automatic_entropy_tuning', type=str2bool, nargs='?',
                         const=True, default=True)
 
@@ -56,7 +57,7 @@ if __name__ == '__main__':
     parser.add_argument('--replay_size', type=int, default=100000)
     parser.add_argument('--cuda',type=str2bool,nargs='?',default=False)
 
-    parser.add_argument('--lr_actor', type = float, default = 0.001)
+    parser.add_argument('--lr_actor', type = float, default = 0.0005)
     parser.add_argument('--lr_critic', type = float, default = 0.0003)
     parser.add_argument('--lr_alpha', type = float, default = 0.003)
     parser.add_argument('--nsteps', type=int, default=60)
@@ -71,7 +72,7 @@ if __name__ == '__main__':
 
 
     assert args.policy_type in ["Gaussian", "Deterministic"]
-    assert args.trace_type in ['retrace','qlambda', 'treebackup','IS']
+    assert args.trace_type in ["retrace","qlambda", "treebackup","IS"]
 
     # Settings
     SEEDS = args.seed
@@ -107,17 +108,24 @@ if __name__ == '__main__':
 
     policy_type = args.policy_type
     trace_type = args.trace_type
-
+    model_type = args.model_type
 
     ## use gpu or not
     cuda = args.cuda
 
-    suffix = "SAC_{}_{}_{}_lam{}_win{}".format(policy_type,
+    suffix = "SAC_{}_{}_{}_lam{}_{}_win{}".format(policy_type,
                 "autotune" if automatic_entropy_tuning and policy_type == "Gaussian" else "",
                                         trace_type,
                 lambda_ if trace_type == "retrace" or trace_type == "qlambda" else "",
+                                        model_type,
                                         look_back)
-    print("We are training {}".format(suffix))
+    words = "======= We are training {} =======".format(suffix)
+    print("="*len(words))
+    print("="*len(words))
+    print(words)
+    print("="*len(words))
+    print("="*len(words))
+
     # ============ Load data ================ #
     train_trade = np.load(train_trade_path)
     val_trade = np.load(val_trade_path)
@@ -141,7 +149,6 @@ if __name__ == '__main__':
                       look_back = look_back,
                       feature_num = num_feature,
                       steps = 2880,
-                      valid_env = True,
                       balance = balance)
 
 
@@ -149,6 +156,7 @@ if __name__ == '__main__':
                               look_back = look_back,
                               steps = val_steps,
                               feature_num = num_feature,
+                              valid_env = True,
                               balance = balance)
     # ============ Start training ================ #
 
@@ -174,6 +182,7 @@ if __name__ == '__main__':
                     cbar=cbar,
                     lambda_= lambda_,
                     policy_type=policy_type,
+                    model_type = model_type,
                     num_episodes=num_episodes)
 
 

@@ -61,17 +61,18 @@ python trace_main.py --policy_type='Deterministic' --nsteps=1 --look_back=10
 
 Some commonly used variables
 ```sh
-python trace_main.py --policy_type [str] \
-                     --trace_type  [str] \
-                     --look_back   [int] \
-                     --cuda        [bool] \
-                     --nsteps      [int] \
-                     --lambda_     [int] \
-                     --lr_actor    [int] \
-                     --lr_critic   [int] \
-                     --lr_alpha    [int] \
-                     --episodes    [int] \
-                     --reps        [int]
+python trace_main.py --policy_type [str:"Gaussian", "Deterministic"] \
+                     --trace_type  [str:"retrace","qlambda", "treebackup","IS"] \
+                     --model_type  [str:"transformer","lstm","fc"] \
+                     --look_back   [int:1-50] \
+                     --cuda        [bool:True or False] \
+                     --nsteps      [int:1-120] \
+                     --lambda_     [float:0-1] \
+                     --lr_actor    [float:] \
+                     --lr_critic   [float:] \
+                     --lr_alpha    [float:] \
+                     --episodes    [int:1-1000] \
+                     --reps        [int:5-10]
 ```
 
 Finally, we suggest using tensorboard to visualize the loss during training by

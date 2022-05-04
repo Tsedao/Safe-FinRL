@@ -31,6 +31,7 @@ class SAC(object):
                       cuda = False,
                       policy_type = "Gaussian",
                       trace_type = "retrace",
+                      model_type = "lstm",
                       num_episodes = 1000,
                       num_iteration = 1440,
                       policy_delay = 1,
@@ -100,7 +101,8 @@ class SAC(object):
         self.critic = QNetwork(state_space,
                                 action_space.shape[0],
                                 look_back,
-                                hidden_size).to(device=self.device)
+                                hidden_size,
+                                model_type).to(device=self.device)
         self.critic_optim = Adam(self.critic.parameters(), lr=lr_critic,weight_decay=weight_decay)
         # self.critic_lr_scheduler = CosineAnnealingWarmRestarts(self.critic_optim, T_0=10,T_mult=1,eta_min=0)
 
@@ -108,7 +110,8 @@ class SAC(object):
         self.critic_target = QNetwork(state_space,
                                     action_space.shape[0],
                                     look_back,
-                                    hidden_size).to(self.device)
+                                    hidden_size,
+                                    model_type).to(self.device)
         hard_update(self.critic_target, self.critic)
 
         if self.policy_type == "Gaussian":
@@ -123,6 +126,7 @@ class SAC(object):
                                         action_space.shape[0],
                                         hidden_size,
                                         look_back,
+                                        model_type,
                                         action_space).to(self.device)
 
             self.policy_optim = Adam(self.policy.parameters(), lr=lr_actor, weight_decay=weight_decay)
@@ -135,6 +139,7 @@ class SAC(object):
                                             action_space.shape[0],
                                             hidden_size,
                                             look_back,
+                                            model_type,
                                             action_space).to(self.device)
             self.policy_optim = Adam(self.policy.parameters(), lr=lr_actor,weight_decay=weight_decay)
         else:
