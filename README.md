@@ -1,10 +1,8 @@
 # Safe-FinRL
 
 This is the open source implementation of a few important multi-step deep RL algorithms
-discussed in the [ICML 2021 paper](https://arxiv.org/abs/2103.00107). We implement these
-algorithms by Pytorch and mainly in combination with [TD3](https://arxiv.org/abs/1802.09477) and [SAC](https://arxiv.org/abs/1801.01290), which are currently popular actor-critic algorithms for continuous control.
-Moreover, we apply the multi-step deep RL algorithms to the Financial Environment inspired by
-[FinRL](https://github.com/AI4Finance-Foundation/FinRL)
+discussed in the [ICML 2021 paper](https://arxiv.org/abs/2103.00107). We implement these algorithms by Pytorch and mainly in combination with [TD3](https://arxiv.org/abs/1802.09477) and [SAC](https://arxiv.org/abs/1801.01290), which are currently popular actor-critic algorithms for continuous control. Moreover, we apply the multi-step deep RL algorithms to the Financial Environment inspired by
+[FinRL](https://github.com/AI4Finance-Foundation/FinRL).
 
 This code implements a few multi-step algorithms to reduce bias and variance, including
 
@@ -21,6 +19,14 @@ This code implements a few multi-step algorithms to reduce bias and variance, in
 
 
 ## Running the code
+
+Please first specify the path of data in ```trace_main.py```:
+```python
+train_trade_path = '..'
+val_trade_path = '..'
+train_feature_path = '..'
+val_feature_path = '..'
+```
 
 For a length of look back window as 10 (```l=10```),
 to run Retrace-SAC, with n-step buffer with ```n=60```, run the following
