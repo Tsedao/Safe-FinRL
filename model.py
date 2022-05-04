@@ -43,8 +43,8 @@ class QNetwork(nn.Module):
 
         # Q1 architecture
         if type == 'transformer':
-            self.encoder1 = CasualMHAEncoder(num_inputs*num_actions, sequence_length, hidden_dim)
-            self.encoder2 = CasualMHAEncoder(num_inputs*num_actions, sequence_length, hidden_dim)
+            self.encoder1 = CausalMHAEncoder(num_inputs*num_actions, sequence_length, hidden_dim)
+            self.encoder2 = CausalMHAEncoder(num_inputs*num_actions, sequence_length, hidden_dim)
             next_dim = num_inputs*num_actions*sequence_length
         elif type == 'lstm':
             self.encoder1 = LSTMEncoder(num_inputs*num_actions,hidden_dim)
@@ -108,7 +108,7 @@ class GaussianPolicy(nn.Module):
                         action_space=None):
         super(GaussianPolicy, self).__init__()
         if type == 'transformer':
-            self.encoder = CasualMHAEncoder(num_inputs*num_actions, sequence_length, hidden_dim)
+            self.encoder = CausalMHAEncoder(num_inputs*num_actions, sequence_length, hidden_dim)
             next_dim = num_inputs*num_actions*sequence_length
         elif type == 'lstm':
             self.encoder = LSTMEncoder(num_inputs*num_actions,hidden_dim)
@@ -189,7 +189,7 @@ class DeterministicPolicy(nn.Module):
         super(DeterministicPolicy, self).__init__()
 
         if type == 'transformer':
-            self.encoder = CasualMHAEncoder(num_inputs*num_actions, sequence_length, hidden_dim)
+            self.encoder = CausalMHAEncoder(num_inputs*num_actions, sequence_length, hidden_dim)
             next_dim = num_inputs*num_actions*sequence_length
         elif type == 'lstm':
             self.encoder = LSTMEncoder(num_inputs*num_actions,hidden_dim)
@@ -289,6 +289,13 @@ class MultiHeadAttention(nn.Module):
         # causal mask to ensure that attention is only applied to the left in the input sequence
         self.register_buffer("mask", torch.tril(torch.ones(seq_len, seq_len))
                                      .view(1, 1, seq_len, seq_len))
+        ## casual mask
+        # tensor([[[[1., 0., 0., 0., 0.],
+        #           [1., 1., 0., 0., 0.],
+        #           [1., 1., 1., 0., 0.],
+        #           [1., 1., 1., 1., 0.],
+        #           [1., 1., 1., 1., 1.]]]])
+        ##
         self.apply(weights_init_)
 
 
@@ -318,9 +325,9 @@ class MultiHeadAttention(nn.Module):
         # Scaled Dot-Product Attention.
         # Attention(Q, K, V) = softmax((QK^T)/sqrt(d_k))V
 
-        # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
-        q.mul_(self.scale)
+        q.mul_(self.scale)        # scale q first
         x = torch.matmul(q, k)  # [b, h, q_len, k_len]
+        # causal self-attention; Self-attend:
         x.masked_fill_(self.mask[:,:,:T,:T] == 0, float('-inf'))
         x = torch.softmax(x, dim=-1)
         x = self.att_dropout(x)
@@ -335,15 +342,15 @@ class MultiHeadAttention(nn.Module):
         return x
 
 
-class CasualMHAEncoder(nn.Module):
+class CausalMHAEncoder(nn.Module):
     def __init__(self, hidden_size, seq_len, filter_size, depth = 3, dropout_rate=0.6):
         """
         Args:
-            hidden_dim: d_model dimension of feature in sequence data
+            hidden_dim: 'd_model' dimension of feature in sequence data
             seq_len: the length of sequence data
             filter_size: hidden_dim in FeedForwardNetwork
         """
-        super(CasualMHAEncoder, self).__init__()
+        super(CausalMHAEncoder, self).__init__()
 
         self.self_attention_norm = nn.LayerNorm(hidden_size, eps=1e-6)
         self.self_attention = MultiHeadAttention(hidden_size, seq_len, dropout_rate=0.6)
@@ -357,7 +364,7 @@ class CasualMHAEncoder(nn.Module):
 
     def forward(self, x):  # pylint: disable=arguments-differ
 
-        # Smaller transformer that only share paremters
+        # a compressed transformer that shares paremters
         for i in range(self.depth):
             y = self.self_attention_norm(x)
             y = self.self_attention(y, y, y)
