@@ -1,5 +1,6 @@
 import gym
 import numpy as np
+import math
 
 
 class DataGenerator(object):
@@ -129,7 +130,8 @@ class StockTradingSim(object):
         updated_total_assets = self.balance + sum(s * p for s, p in zip(self.shares,next_price[:,0]) if s>=0) + \
                                                 sum(s * p for s, p in zip(self.shares,next_price[:,1]) if s<0)
 
-        reward = np.log(updated_total_assets / initial_total_assets)
+        reward = math.log(updated_total_assets / initial_total_assets) if updated_total_assets >= 0 else -1
+
 
         return self.balance, self.shares, reward, updated_total_assets
 
@@ -379,7 +381,7 @@ class StockTradingEnv(gym.Env):
 
         self.infos.append(info)
 
-        return (self.obs_balance,self.obs_shares,obs), reward, done1 or done2, info
+        return (self.obs_balance.copy(),self.obs_shares.copy(),obs.copy()), reward, done1 or done2, info
 
     def reset(self):
         return self._reset()
@@ -397,4 +399,4 @@ class StockTradingEnv(gym.Env):
 
         self.obs_balance = np.ones(self.look_back)*self.sim.balance
         self.obs_shares = np.zeros(shape = (self.num_stock, self.look_back))
-        return (self.obs_balance,self.obs_shares,obs), info
+        return (self.obs_balance.copy(),self.obs_shares.copy(),obs.copy()), info

@@ -13,6 +13,8 @@ from utils import soft_update, hard_update
 from model import GaussianPolicy, QNetwork, DeterministicPolicy
 
 
+# TODO: 1. propose a entropy 2. finish trace_sac_jupyter_notebook 3. check trace_sac
+
 class SAC(object):
     def __init__(self, state_space,
                       action_space,
@@ -20,46 +22,86 @@ class SAC(object):
                       gamma = 0.99,
                       tau = 0.005,
                       alpha=0.1,
-                      lr = 0.0003,
+                      lr_actor = 0.0003,
+                      lr_critic = 0.0003,
+                      lr_alpha = 0.0003,
                       weight_decay = 0,
                       target_update_interval = 1,
                       automatic_entropy_tuning = True,
                       cuda = False,
                       policy_type = "Gaussian",
+                      trace_type = "retrace",
                       num_episodes = 1000,
                       num_iteration = 1440,
+                      policy_delay = 1,
+                      nsteps = 10,
+                      cbar = 1.0,
+                      lambda_ = 1.0,
                       hidden_size = 256):
 
         """
         Args:
             tau - target smoothing coefficient(τ) (default: 0.005)
             alpha - Temperature parameter α determines the relative importance of the entropy\
-                    term against the reward (default: 0.1)
+                    term against the reward (default: 0.2)
+
             target_update_interval - Value target update per no. of updates per step (default: 1)
-            lr - learning rate (default: 0.0003)
-            gamma - discount factor
-            num_episodes -
+
+            lr_actor - learning rate (default: 0.0003)
+
+            lr_critic - learning rate (default: 0.0003)
+
+            lr_alpha - learning rate (default: 0.0003)
+
+
+            policy_delay (int) - Policy will only be updated once every
+                    policy_delay times for each update of the Q-networks.
+
+            gamma - time discount factor
+
+            trace_type - all forward type ['retrace','q_lambda', 'tree_backup','IS']
+
+            policy_type - ['Guassian', 'Deterministic']
+
+            num_episodes - total number episodes (used for lr_scheduler CosineAnnealingLR)
+
+            num_iteration - maximum no. iterations in one episode (used for lr_scheduler CosineAnnealingLR)
+
+            lambda (float) - The lambda parameter used for trading-off fixed point bias
+                        and contraction rate, defined in Peng's Q operator
+
+            n_steps (int) - The bootstrapping horizon of n-step. Note that even in Retrace
+            where the operator is defined with infinite horizon, in practice we still
+            compute updates based on finite partial trajectory of length n
+
+            cbar (float) - The truncation coefficient that defines Retrace, c_t = min(cbar, pi / mu)
+
             hidden_size -
             automatic_entropy_tuning -
-            weight_decay - coefficient of l2 regularization term
+            weight_decay - coefficient of l2 regularization term in the network
         """
 
         self.gamma = gamma
         self.tau = tau
         self.alpha = alpha
+        self.nsteps = nsteps            # n-step return
+        self.cbar = cbar
+        self.lambda_ = lambda_
 
         self.policy_type = policy_type
+        self.trace_type =  trace_type
 
         self.target_update_interval = target_update_interval
         self.automatic_entropy_tuning = automatic_entropy_tuning
+        self.policy_delay = policy_delay
 
         self.device = torch.device("cuda" if cuda and torch.cuda.is_available() else "cpu")
-
+        print("==== Using {} to train the network =====".format(self.device))
         self.critic = QNetwork(state_space,
                                 action_space.shape[0],
                                 look_back,
                                 hidden_size).to(device=self.device)
-        self.critic_optim = Adam(self.critic.parameters(), lr=lr,weight_decay=weight_decay)
+        self.critic_optim = Adam(self.critic.parameters(), lr=lr_critic,weight_decay=weight_decay)
         # self.critic_lr_scheduler = CosineAnnealingWarmRestarts(self.critic_optim, T_0=10,T_mult=1,eta_min=0)
 
         self.critic_lr_scheduler = ExponentialLR(self.critic_optim, gamma=0.9996)
@@ -75,7 +117,7 @@ class SAC(object):
                 self.target_entropy = -torch.prod(torch.Tensor(action_space.shape).to(self.device)).item()
                 # self.target_entropy = -6
                 self.log_alpha = torch.zeros(1, requires_grad=True, device=self.device)
-                self.alpha_optim = Adam([self.log_alpha], lr=lr)
+                self.alpha_optim = Adam([self.log_alpha], lr=lr_alpha)
 
             self.policy = GaussianPolicy(state_space,
                                         action_space.shape[0],
@@ -83,10 +125,10 @@ class SAC(object):
                                         look_back,
                                         action_space).to(self.device)
 
-            self.policy_optim = Adam(self.policy.parameters(), lr=lr, weight_decay=weight_decay)
+            self.policy_optim = Adam(self.policy.parameters(), lr=lr_actor, weight_decay=weight_decay)
 
 
-        else:
+        elif self.policy_type == "Deterministic":
             self.alpha = 0
             self.automatic_entropy_tuning = False
             self.policy = DeterministicPolicy(state_space,
@@ -94,8 +136,9 @@ class SAC(object):
                                             hidden_size,
                                             look_back,
                                             action_space).to(self.device)
-            self.policy_optim = Adam(self.policy.parameters(), lr=lr,weight_decay=weight_decay)
-
+            self.policy_optim = Adam(self.policy.parameters(), lr=lr_actor,weight_decay=weight_decay)
+        else:
+            raise NotImplementedError
         # self.policy_lr_scheduler = CosineAnnealingWarmRestarts(self.policy_optim, T_0=num_episodes,T_mult=1, eta_min=0)
         self.policy_lr_scheduler = ExponentialLR(self.policy_optim, gamma=0.999)
 
@@ -104,10 +147,10 @@ class SAC(object):
         state =  self.normalize(state)
         state = torch.FloatTensor(state).to(self.device)
         if evaluate is False:
-            action, _, _ = self.policy.sample(state)
+            action, log_pi, _ = self.policy.sample(state)
         else:
-            _, _, action = self.policy.sample(state)
-        return action.detach().cpu().numpy()[0]
+            _, log_pi, action = self.policy.sample(state)
+        return action.detach().cpu().numpy()[0], log_pi.detach().cpu().numpy()[0]
 
     def normalize(self, state_batch):
         """
@@ -157,9 +200,15 @@ class SAC(object):
 
     def update_parameters(self, memory, batch_size, updates):
         # Sample a batch from memory
-        state_batch, action_batch, reward_batch, next_state_batch, mask_batch = memory.sample(batch_size=batch_size)
+        state_batch_, action_batch_, log_pi_batch_, reward_batch_, next_state_batch_, mask_batch_ = memory.sample(batch_size=batch_size)
         # print("action_batch",action_batch)
         # print("state_batch",state_batch)
+        state_batch = state_batch_[:,-1,:]
+        action_batch = action_batch_[:,-1,:]
+        reward_batch = reward_batch_[:,-1]
+        next_state_batch = next_state_batch_[:,-1,:]
+        mask_batch = mask_batch_[:,-1]
+
         state_batch = self.normalize(state_batch)
         next_state_batch = self.normalize(next_state_batch)
 
@@ -173,11 +222,72 @@ class SAC(object):
         with torch.no_grad():
             next_state_action, next_state_log_pi, _ = self.policy.sample(next_state_batch)
             qf1_next_target, qf2_next_target = self.critic_target(next_state_batch, next_state_action)
-            min_qf_next_target = torch.min(qf1_next_target, qf2_next_target) - self.alpha * next_state_log_pi
-            next_q_value = reward_batch + mask_batch * self.gamma * (min_qf_next_target)
+            qf1_final_target = qf1_next_target - self.alpha * next_state_log_pi
+            qf2_final_target = qf2_next_target - self.alpha * next_state_log_pi
+
+            q1_lambda  = reward_batch + mask_batch * self.gamma * (qf1_final_target) - \
+                     self.alpha * next_state_log_pi
+            q2_lambda  = reward_batch + mask_batch * self.gamma * (qf2_final_target) - \
+                     self.alpha * next_state_log_pi
+
+        for i in range(2,self.nsteps+1):
+            state_batch = state_batch_[:,-i,:]
+            action_batch = action_batch_[:,-i,:]
+            log_pi_batch = log_pi_batch_[:,-i,:]
+            reward_batch = reward_batch_[:,-i]
+            next_state_batch = next_state_batch_[:,-i,:]
+            mask_batch = mask_batch_[:,-i]
+
+
+            state_batch = self.normalize(state_batch)
+            next_state_batch = self.normalize(next_state_batch)
+
+            state_batch = torch.FloatTensor(state_batch).to(self.device)
+
+            next_state_batch = torch.FloatTensor(next_state_batch).to(self.device)
+            action_batch = torch.FloatTensor(action_batch).to(self.device)
+            log_pi_batch = torch.FloatTensor(log_pi_batch).to(self.device)
+            reward_batch = torch.FloatTensor(reward_batch).to(self.device).unsqueeze(1)
+            mask_batch = torch.FloatTensor(1-mask_batch).to(self.device).unsqueeze(1)
+
+            with torch.no_grad():
+                next_state_action, next_state_log_pi, _ = self.policy.sample(next_state_batch)
+                qf1_next_target, qf2_next_target = self.critic_target(next_state_batch, next_state_action)
+                rho_i = torch.exp(next_state_log_pi - log_pi_batch)
+
+                if self.trace_type == 'retrace':
+                    trace_i = torch.min(torch.ones_like(rho_i)*self.cbar, rho_i) * self.lambda_
+
+                elif self.trace_type == 'qlambda':
+                    trace_i = self.lambda_
+
+                elif self.trace_type == 'IS':
+                    trace_i = rho_i
+
+                elif self.trace_type == 'treebackup':
+                    trace_i = torch.exp(next_state_log_pi)
+
+                else:
+                    raise NotImplementedError
+
+                q1_lambda = reward_batch + mask_batch * self.gamma * qf1_next_target - \
+                         self.alpha * next_state_log_pi + self.gamma * trace_i * \
+                           (q1_lambda - qf1_next_target + self.alpha * next_state_log_pi)
+
+                q2_lambda = reward_batch + mask_batch * self.gamma * qf2_next_target - \
+                         self.alpha * next_state_log_pi + self.gamma * trace_i * \
+                          (q2_lambda - qf2_next_target + self.alpha * next_state_log_pi)
+
+        with torch.no_grad():
+            backup = torch.min(q1_lambda, q2_lambda)
+
         qf1, qf2 = self.critic(state_batch, action_batch)  # Two Q-functions to mitigate positive bias in the policy improvement step
-        qf1_loss = F.mse_loss(qf1, next_q_value)  # JQ = 𝔼(st,at)~D[0.5(Q1(st,at) - r(st,at) - γ(𝔼st+1~p[V(st+1)]))^2]
-        qf2_loss = F.mse_loss(qf2, next_q_value)  # JQ = 𝔼(st,at)~D[0.5(Q1(st,at) - r(st,at) - γ(𝔼st+1~p[V(st+1)]))^2]
+        # qf1_loss = F.mse_loss(qf1, backup)
+        # qf2_loss = F.mse_loss(qf2, backup)
+
+        qf1_loss = torch.nn.SmoothL1Loss()(qf1, backup)
+        qf2_loss = torch.nn.SmoothL1Loss()(qf2, backup)
+
         qf_loss = qf1_loss + qf2_loss
 
         self.critic_optim.zero_grad()
@@ -193,14 +303,13 @@ class SAC(object):
 
         # print('min_qf_pi',min_qf_pi,"state", state_batch)
         # print("policy_loss", policy_loss, "alpha", self.alpha)
-        self.policy_optim.zero_grad()
-        policy_loss.backward()
-
-        clip_grad_norm_(self.policy.parameters(), 5)
-        self.policy_optim.step()
+        if updates % self.policy_delay == 0:
+            self.policy_optim.zero_grad()
+            policy_loss.backward()
+            clip_grad_norm_(self.policy.parameters(), 5)
+            self.policy_optim.step()
 
         if self.automatic_entropy_tuning:
-
             alpha_loss = -(self.log_alpha.exp() * (log_pi + self.target_entropy).detach()).mean()
 
             self.alpha_optim.zero_grad()
@@ -220,12 +329,12 @@ class SAC(object):
         return qf1_loss.item(), qf2_loss.item(), policy_loss.item(), alpha_loss.item(), alpha_tlogs.item()
 
     # Save model parameters
-    def save_checkpoint(self, env_name, suffix="", ckpt_path=None):
+    def save_checkpoint(self, suffix="", ckpt_path=None):
         if not os.path.exists('checkpoints/'):
             os.makedirs('checkpoints/')
         if ckpt_path is None:
             ckpt_path = "checkpoints/{}_sac_checkpoint_{}_{}".format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
-                                                                        env_name, suffix)
+                                                                        suffix)
         print('Saving models to {}'.format(ckpt_path))
         torch.save({'policy_state_dict': self.policy.state_dict(),
                     'critic_state_dict': self.critic.state_dict(),
