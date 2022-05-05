@@ -96,7 +96,7 @@ class SAC(object):
         self.automatic_entropy_tuning = automatic_entropy_tuning
         self.policy_delay = policy_delay
 
-        self.device = torch.device("cuda" if cuda and torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cuda:0" if cuda and torch.cuda.is_available() else "cpu")
         print("==== Using {} to train the network =====".format(self.device))
         self.critic = QNetwork(state_space,
                                 action_space.shape[0],

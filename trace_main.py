@@ -29,6 +29,8 @@ def str2bool(v):
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
+# TODO: 1. episode may end earlier when samples in the replayer buffer do not reach
+#          the batch size, case1: ends at 420 episode step because of total asset < 0
 
 if __name__ == '__main__':
     import argparse
@@ -53,7 +55,7 @@ if __name__ == '__main__':
     parser.add_argument('--automatic_entropy_tuning', type=str2bool, nargs='?',
                         const=True, default=True)
 
-    parser.add_argument('--batch_size', type=int, default=32)
+    parser.add_argument('--batch_size', type=int, default=16)
     parser.add_argument('--replay_size', type=int, default=100000)
     parser.add_argument('--cuda',type=str2bool,nargs='?',default=False)
 
@@ -244,7 +246,6 @@ if __name__ == '__main__':
         #     agent.critic_lr_scheduler.step()
         #     agent.policy_lr_scheduler.step()
             total_numsteps += 1
-
             market_gains = np.sum(np.vstack([info['market_gain'] for info in env.infos]),axis=0)[0]
             print("-------------------------------------------")
             print("Training Episode: {:d}, Avg Episode Reward: {:4f}, Market-Gain: {:4f}, elapase:{:4f}s".format(total_numsteps,
