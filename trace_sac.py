@@ -40,6 +40,7 @@ class SAC(object):
                       nsteps = 10,
                       cbar = 1.0,
                       lambda_ = 1.0,
+                      balance_init = 100000,
                       hidden_size = 256):
 
         """
@@ -83,6 +84,7 @@ class SAC(object):
             automatic_entropy_tuning -
             weight_decay - coefficient of l2 regularization term in the network
         """
+        self.balance_init = balance_init
 
         self.gamma = gamma
         self.tau = tau
@@ -126,8 +128,8 @@ class SAC(object):
 
             self.policy = GaussianPolicy(state_space,
                                         action_space.shape[0],
-                                        hidden_size,
                                         look_back,
+                                        hidden_size,
                                         model_type,
                                         action_space).to(self.device)
 
@@ -139,8 +141,8 @@ class SAC(object):
             self.automatic_entropy_tuning = False
             self.policy = DeterministicPolicy(state_space,
                                             action_space.shape[0],
-                                            hidden_size,
                                             look_back,
+                                            hidden_size,
                                             model_type,
                                             action_space).to(self.device)
             self.policy_optim = Adam(self.policy.parameters(), lr=lr_actor,weight_decay=weight_decay)
@@ -155,9 +157,14 @@ class SAC(object):
         state = torch.FloatTensor(state).to(self.device)
         if evaluate is False:
             action, log_pi, _ = self.policy.sample(state)
+
         else:
             _, log_pi, action = self.policy.sample(state)
-        return action.detach().cpu().numpy()[0], log_pi.detach().cpu().numpy()[0]
+        if self.policy_type == "Deterministic":
+            log_pi = log_pi.detach().cpu().numpy()
+        else:
+            log_pi = log_pi.detach().cpu().numpy()[0]
+        return action.detach().cpu().numpy()[0], log_pi
 
     def normalize(self, state_batch):
         """
@@ -188,9 +195,9 @@ class SAC(object):
             shares = np.expand_dims(shares, axis = 0)
         if len(states.shape) == 3:
             states = np.expand_dims(states, axis = 0)
-        first_time_balance = np.expand_dims(balance[:,0],axis=-1)
-        balance = np.divide(balance, first_time_balance,
-                    out=np.zeros_like(balance), where=first_time_balance!=0)
+        # first_time_balance = np.expand_dims(balance[:,0],axis=-1)
+        balance = np.divide(balance, self.balance_init,
+                    out=np.zeros_like(balance), where=self.balance_init!=0)
 
         # normalize the last four price vector by its first value
         states[:,:,:,-4:] /= np.expand_dims(states[:,:,0,-4:],axis=2)

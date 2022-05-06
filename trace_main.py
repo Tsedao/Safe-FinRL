@@ -32,7 +32,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--hid', type=int, default=128)                          # hidden_size of fc
-    parser.add_argument('--look_back', type=int, default=5)
+    parser.add_argument('--look_back', type=int, default=8)
     parser.add_argument('--num_stock', type=int, default=1)
     parser.add_argument('--balance',type=int, default=100000)
 
@@ -68,9 +68,10 @@ if __name__ == '__main__':
     parser.add_argument('--env',type=int, default = 0)
     args = parser.parse_args()
 
-
-    assert args.policy_type in ["Gaussian", "Deterministic"]
-    assert args.trace_type in ["retrace","qlambda", "treebackup","IS"]
+    trace_list = ["retrace","qlambda", "treebackup","IS"]
+    policy_list = ["Gaussian", "Deterministic"]
+    assert args.policy_type in policy_list
+    assert args.trace_type in trace_list
 
     # Settings
     SEEDS = args.seed
@@ -113,9 +114,10 @@ if __name__ == '__main__':
 
     env_num = args.env
 
-    suffix = "SAC_{}_{}_{}_lam{}_{}_win{}_env{}".format(policy_type,
+    suffix = "SAC_{}_{}_{}_step{}_lam{}_{}_win{}_env{}".format(policy_type,
                 "autotune" if automatic_entropy_tuning and policy_type == "Gaussian" else "",
-                                        trace_type,
+                            trace_type if trace_type in trace_list else "",
+                                        nsteps,
                 lambda_ if trace_type == "retrace" or trace_type == "qlambda" else "",
                                         model_type,
                                         look_back,
@@ -194,6 +196,7 @@ if __name__ == '__main__':
                     lambda_= lambda_,
                     policy_type=policy_type,
                     model_type = model_type,
+                    balance_init = balance,
                     num_episodes=num_episodes)
 
 
