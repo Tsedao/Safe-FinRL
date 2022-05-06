@@ -14,6 +14,8 @@ from model import GaussianPolicy, QNetwork, DeterministicPolicy
 
 
 # TODO: 1. propose a entropy 2. finish trace_sac_jupyter_notebook 3. check trace_sac
+# TODO: 1. efficient-FinRL, 2. pre-trained model, 3. env_action
+
 
 class SAC(object):
     def __init__(self, state_space,

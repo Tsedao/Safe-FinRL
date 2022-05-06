@@ -48,7 +48,6 @@ class DataGenerator(object):
 
         # used for compute optimal action and reward
         ground_truth_obs = self.data[:, self.step + self.look_back:self.step + self.look_back + 1, :].copy()
-
         done = self.step >= self.steps
         return obs, done, ground_truth_obs
 

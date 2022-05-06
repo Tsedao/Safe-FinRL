@@ -166,7 +166,7 @@ class CausalMHAEncoder(nn.Module):
 
 class LSTMEncoder(nn.Module):
 
-    def __init__(self, input_size, hidden_size, num_layers=2, batch_first=True):
+    def __init__(self, input_size, hidden_size, num_layers=3, batch_first=True):
         super(LSTMEncoder, self).__init__()
         self.lstm = nn.LSTM(input_size, hidden_size, num_layers,batch_first, bidirectional=False)
 

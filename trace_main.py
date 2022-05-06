@@ -14,11 +14,6 @@ from replay_buffer import ReplayMemory
 from stock_trading_env import StockTradingEnv
 
 
-train_trade_path = './train_trade_table.npy'
-val_trade_path = './val_trade_table.npy'
-train_feature_path = './train_feature_array_standard.npy'
-val_feature_path = './val_feature_array_standard.npy'
-
 def str2bool(v):
     if isinstance(v, bool):
         return v
@@ -37,7 +32,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--hid', type=int, default=128)                          # hidden_size of fc
-    parser.add_argument('--look_back', type=int, default=10)
+    parser.add_argument('--look_back', type=int, default=5)
     parser.add_argument('--num_stock', type=int, default=1)
     parser.add_argument('--balance',type=int, default=100000)
 
@@ -62,7 +57,7 @@ if __name__ == '__main__':
     parser.add_argument('--lr_actor', type = float, default = 0.0005)
     parser.add_argument('--lr_critic', type = float, default = 0.0003)
     parser.add_argument('--lr_alpha', type = float, default = 0.003)
-    parser.add_argument('--nsteps', type=int, default=60)
+    parser.add_argument('--nsteps', type=int, default=30)
     parser.add_argument('--delay', type=int, default=1)
     parser.add_argument('--cbar', type=float, default=1.0)
     parser.add_argument('--alpha', type=float, default=0.1)
@@ -70,6 +65,7 @@ if __name__ == '__main__':
 
 
     parser.add_argument('--reps',type=int, default = 5)
+    parser.add_argument('--env',type=int, default = 0)
     args = parser.parse_args()
 
 
@@ -115,12 +111,15 @@ if __name__ == '__main__':
     ## use gpu or not
     cuda = args.cuda
 
-    suffix = "SAC_{}_{}_{}_lam{}_{}_win{}".format(policy_type,
+    env_num = args.env
+
+    suffix = "SAC_{}_{}_{}_lam{}_{}_win{}_env{}".format(policy_type,
                 "autotune" if automatic_entropy_tuning and policy_type == "Gaussian" else "",
                                         trace_type,
                 lambda_ if trace_type == "retrace" or trace_type == "qlambda" else "",
                                         model_type,
-                                        look_back)
+                                        look_back,
+                                        env_num)
     words = "======= We are training {} =======".format(suffix)
     print("="*len(words))
     print("="*len(words))
@@ -129,6 +128,15 @@ if __name__ == '__main__':
     print("="*len(words))
 
     # ============ Load data ================ #
+
+    # PREFIX = '.'
+    PREFIX = 'data/week%d'%(env_num)
+    train_trade_path = PREFIX+ '/train_trade_table.npy'
+    val_trade_path = PREFIX+'/val_trade_table.npy'
+    train_feature_path = PREFIX+'/train_feature_array_standard.npy'
+    val_feature_path = PREFIX+'/val_feature_array_standard.npy'
+
+
     train_trade = np.load(train_trade_path)
     val_trade = np.load(val_trade_path)
     train_feature = np.load(train_feature_path)
@@ -150,7 +158,8 @@ if __name__ == '__main__':
     env = StockTradingEnv(train_states,
                       look_back = look_back,
                       feature_num = num_feature,
-                      steps = 2880,
+                      steps = 4320-look_back - nsteps,
+                      valid_env = True,
                       balance = balance)
 
 
@@ -215,6 +224,8 @@ if __name__ == '__main__':
 
                     # print("updates:",updates,"action: ",action[0], 'env steps', env.src.step)
                     next_state, reward, done, _ = env.step(action) # Step
+                    if done:
+                        break
 
                     episode_reward += reward
                     episode_steps += 1
@@ -228,8 +239,9 @@ if __name__ == '__main__':
 
                     state = next_state
                 # important to make a deep copy of the state
-                memory.push(copy.deepcopy(obs_all), action_all, log_pi_all,
-                                        rews_all, copy.deepcopy(next_obs_all), done_all) # Append transition to memory
+                if len(obs_all) == nsteps:
+                    memory.push(copy.deepcopy(obs_all), action_all, log_pi_all,
+                                            rews_all, copy.deepcopy(next_obs_all), done_all) # Append transition to memory
                 if len(memory) > batch_size:
                     # Number of updates per step in environment
                     for i in range(updates_per_step):
