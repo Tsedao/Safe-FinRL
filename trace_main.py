@@ -132,7 +132,7 @@ if __name__ == '__main__':
     # ============ Load data ================ #
 
     # PREFIX = '.'
-    PREFIX = 'data/week%d'%(env_num)
+    PREFIX = 'data2/week%d'%(env_num)
     train_trade_path = PREFIX+ '/train_trade_table.npy'
     val_trade_path = PREFIX+'/val_trade_table.npy'
     train_feature_path = PREFIX+'/train_feature_array_standard.npy'
@@ -160,9 +160,9 @@ if __name__ == '__main__':
     env = StockTradingEnv(train_states,
                       look_back = look_back,
                       feature_num = num_feature,
-                      steps = 4320-look_back - nsteps,
+                      steps = 2880-look_back - nsteps,
                       valid_env = True,
-                      balance = balance)
+                      balance_init = balance)
 
 
     env_val = StockTradingEnv(val_states,
@@ -170,7 +170,7 @@ if __name__ == '__main__':
                               steps = val_steps,
                               feature_num = num_feature,
                               valid_env = True,
-                              balance = balance)
+                              balance_init = balance)
     # ============ Start training ================ #
 
     for i in range(reps):
@@ -263,9 +263,9 @@ if __name__ == '__main__':
             total_numsteps += 1
             market_gains = np.sum(np.vstack([info['market_gain'] for info in env.infos]),axis=0)[0]
             print("-------------------------------------------")
-            print("Training Episode: {:d}, Avg Episode Reward: {:4f}, Market-Gain: {:4f}, elapase:{:4f}s".format(total_numsteps,
-                                                                                        episode_reward /episode_steps,
-                                                                                        market_gains / episode_steps,
+            print("Training Episode: {:d}, Avg Episode Reward: {:4f}(%%), Market-Gain: {:4f}(%%), elapase:{:4f}s".format(total_numsteps,
+                                                                                        1e+4 * episode_reward /episode_steps,
+                                                                                        1e+4 * market_gains / episode_steps,
                                                                                         time.time() - pre_time))
             print("Critic 1 Loss: {:.4e}, Critic 2 loss: {:.4e}, policy_loss: {:.4f}, ent loss: {:.4f}".format(critic_1_loss,
                                                                                                 critic_2_loss,
@@ -300,12 +300,12 @@ if __name__ == '__main__':
                     avg_reward += episode_reward
                 avg_reward /= episodes
 
-                writer.add_scalar('avg_reward/test', avg_reward, i_episode)
+                writer.add_scalar('avg_reward/test', 1e+4*avg_reward, i_episode)
                 market_gains = np.sum(np.vstack([info['market_gain'] for info in env_val.infos]),axis=0)[0]
                 print("-------------------------------------------")
-                print("Testing Episode: {:d}, Episode Reward: {:4f},Market-Gain: {:4f} ".format(i_episode,
-                                                                                                 avg_reward,
-                                                                                               market_gains))
+                print("Testing Episode: {:d}, Episode Reward(%%): {:4f},Market-Gain(%%): {:4f} ".format(i_episode,
+                                                                                            1e+4 * avg_reward,
+                                                                                             1e+4 * market_gains))
                 print("-------------------------------------------")
 
         agent.save_checkpoint(suffix = suffix)
