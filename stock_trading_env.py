@@ -76,7 +76,7 @@ class StockTradingSim(object):
                        trading_cost=0.0004,
                        num_stock = 1,
                        balance=100000,
-                       unit = 0.00001):
+                       unit = 0.0001):
 
         self.trading_cost = trading_cost
         self.num_stock = num_stock
@@ -130,7 +130,7 @@ class StockTradingSim(object):
         updated_total_assets = self.balance + sum(s * p for s, p in zip(self.shares,next_price[:,0]) if s>=0) + \
                                                 sum(s * p for s, p in zip(self.shares,next_price[:,1]) if s<0)
 
-        reward = math.log(updated_total_assets / initial_total_assets) if updated_total_assets > 0 and initial_total_assets > 0 else -1
+        reward = 100*math.log(updated_total_assets / initial_total_assets) if updated_total_assets > 0 and initial_total_assets > 0 else -1
 
 
 
@@ -146,9 +146,11 @@ class StockTradingSim(object):
         action_unit = np.array(action) // np.array(self.unit)
         action = action_unit * self.unit
         # price 0: selling price 1: buying price
-        max_unit  = (self.balance_init / (price[index,0]* (1 + self.trading_cost))) // self.unit + shares
-        max_share = max_unit * self.unit
-        action = -min(max_share,abs(action))
+
+        ## CONSTRAINTS
+        # max_unit  = (self.balance_init / (price[index,0]* (1 + self.trading_cost))) // self.unit
+        # max_share = max_unit * self.unit
+        # action = -min(max_share,abs(action))
 
         # action [-1]  shares [0.5]
         short_position = abs(max(min(action + shares,0),action))
@@ -184,10 +186,11 @@ class StockTradingSim(object):
 
         # TODO: Modify the code to suitable for doing long first when shares <0
         # error may happen here
-        max_unit  = (self.balance / (price[index,0]* (1 + self.trading_cost))) // self.unit
-        max_share = max_unit * self.unit
 
-        action = min(max_share,action)
+        ## CONSTRAINTS
+        # max_unit  = (self.balance / (price[index,0]* (1 + self.trading_cost))) // self.unit
+        # max_share = max_unit * self.unit
+        # action = min(max_share,action)
 
 
         # action 1 shares [-0.5]
@@ -235,7 +238,7 @@ class StockTradingEnv(gym.Env):
                  start_idx=0,
                  feature_num=4,
                  balance_init = 100000,
-                 h_max = 0.001,
+                 h_max = 1,
                  valid_env = False,
                  verbose = False
                  ):
@@ -321,7 +324,7 @@ class StockTradingEnv(gym.Env):
         self.obs_shares[:,:-1],  self.obs_shares[:,-1:] = temp, share.copy()
 
         info = {}
-        info['market_gain'] = np.log(market_gain)
+        info['market_gain'] = 100*np.log(market_gain)
         info['action_reward'] = reward
         info['total_wealth'] = update_total_asset
         info['balance'] =  balance

@@ -23,7 +23,7 @@ class SAC(object):
                       look_back,
                       gamma = 0.99,
                       tau = 0.005,
-                      alpha=0.1,
+                      alpha=0.001,
                       lr_actor = 0.0003,
                       lr_critic = 0.0003,
                       lr_alpha = 0.0003,
@@ -110,7 +110,7 @@ class SAC(object):
         self.critic_optim = Adam(self.critic.parameters(), lr=lr_critic,weight_decay=weight_decay)
         # self.critic_lr_scheduler = CosineAnnealingWarmRestarts(self.critic_optim, T_0=10,T_mult=1,eta_min=0)
 
-        self.critic_lr_scheduler = ExponentialLR(self.critic_optim, gamma=0.9996)
+        self.critic_lr_scheduler = ExponentialLR(self.critic_optim, gamma=0.996)
         self.critic_target = QNetwork(state_space,
                                     action_space.shape[0],
                                     look_back,
@@ -149,7 +149,7 @@ class SAC(object):
         else:
             raise NotImplementedError
         # self.policy_lr_scheduler = CosineAnnealingWarmRestarts(self.policy_optim, T_0=num_episodes,T_mult=1, eta_min=0)
-        self.policy_lr_scheduler = ExponentialLR(self.policy_optim, gamma=0.999)
+        self.policy_lr_scheduler = ExponentialLR(self.policy_optim, gamma=0.9996)
 
 
     def select_action(self, state, evaluate=False):
@@ -347,8 +347,7 @@ class SAC(object):
         if not os.path.exists('checkpoints/'):
             os.makedirs('checkpoints/')
         if ckpt_path is None:
-            ckpt_path = "checkpoints/{}_sac_checkpoint_{}".format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
-                                                                        suffix)
+            ckpt_path = "checkpoints/sac_checkpoint_{}".format(suffix)
         print('Saving models to {}'.format(ckpt_path))
         torch.save({'policy_state_dict': self.policy.state_dict(),
                     'critic_state_dict': self.critic.state_dict(),
