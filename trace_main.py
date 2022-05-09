@@ -281,18 +281,17 @@ if __name__ == '__main__':
 
 
             ## validating training every 5 episodoes
-            if i_episode % 1 == 0:
+            if i_episode % 5 == 0:
                 state, _ = env_val.reset()
-                state_ = [state]
                 episode_reward = 0
                 done = False
                 while not done:
+                    state_ = [state]
                     action, _ = agent.select_action(state_, evaluate=True)
                     next_state, reward, done, _ = env_val.step(action)
                     episode_reward += reward
-
-
                     state = next_state
+
                     # print("action: ",action[0], 'env steps', env_val.src.step,'reward:',reward)
 
                 writer.add_scalar('avg_reward/test', episode_reward, i_episode)

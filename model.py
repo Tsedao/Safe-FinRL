@@ -170,7 +170,6 @@ class GaussianPolicy(nn.Module):
         state = state.view(state.size(0),state.size(1), -1)
 
         state = self.encoder(state)
-
         state = torch.flatten(state, start_dim = 1)
 
         x = F.relu(self.linear1(state))
