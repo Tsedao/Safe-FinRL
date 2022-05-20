@@ -13,6 +13,22 @@ from replay_buffer import ReplayMemory
 
 from stock_trading_env import StockTradingEnv
 
+from os import listdir
+from os.path import isfile, join
+
+def load_pretrain_parameters(mypath = './pretrain/'):
+    for f in [f for f in listdir(mypath) if isfile(join(mypath, f))]:
+        f_list = f.split('_')
+        env_str = int(f_list[2][-1])
+        if env_str == env_num:
+            hidden_size = int(f_list[10])
+            num_layers = int(f_list[16])
+            depth = int(f_list[18])
+            dre = float(f_list[20])
+            pretrain_path = join(mypath,f)
+            break
+
+    return hidden_size, num_layers, depth, dre, pretrain_path
 
 def str2bool(v):
     if isinstance(v, bool):
@@ -32,17 +48,17 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--hid', type=int, default=128)                          # hidden_size of fc
-    parser.add_argument('--look_back', type=int, default=5)
+    parser.add_argument('--look_back', type=int, default=3)
     parser.add_argument('--num_stock', type=int, default=1)
     parser.add_argument('--balance',type=int, default=100000)
 
     parser.add_argument('--gamma', type=float, default=0.99)
     parser.add_argument('--tau', type=float, default=0.005)
-    parser.add_argument('--seed', '-s', type=int, default=123)
-    parser.add_argument('--episodes', type=int, default=100)
+    parser.add_argument('--seed', type=int, default=123)
+    parser.add_argument('--episodes','-e',type=int, default=100)
     parser.add_argument('--updates_per_step', type=int, default=1)               # how many times to update in one step in env
-    parser.add_argument('--target_update_interval', type=int, default = 1)       # how often to update the target value network
-    parser.add_argument('--policy_delay', type=int, default = 1)                 # how often to update the policy network
+    parser.add_argument('--target_update_interval', type=int, default = 2)       # how often to update the target value network
+    parser.add_argument('--policy_delay', type=int, default = 10)                 # how often to update the policy network
 
     parser.add_argument('--policy_type', type=str, default='Gaussian')           # includes ["Gaussian", "Deterministic"]
     parser.add_argument('--trace_type', type=str, default='retrace')             # includes ['retrace','q_lambda', 'tree_backup','IS']
@@ -51,26 +67,29 @@ if __name__ == '__main__':
                         const=True, default=True)
 
     parser.add_argument('--batch_size', type=int, default=16)
-    parser.add_argument('--replay_size', type=int, default=100000)
+    parser.add_argument('--replay_size', type=int, default=20000)
     parser.add_argument('--cuda',type=str2bool,nargs='?',default=False)
 
-    parser.add_argument('--lr_actor', type = float, default = 0.0005)
+    parser.add_argument('--lr_actor', type = float, default = 0.0003)
     parser.add_argument('--lr_critic', type = float, default = 0.0003)
     parser.add_argument('--lr_alpha', type = float, default = 0.003)
     parser.add_argument('--nsteps', type=int, default=30)
     parser.add_argument('--delay', type=int, default=1)
     parser.add_argument('--cbar', type=float, default=1.0)
-    parser.add_argument('--alpha', type=float, default=0.1)
+    parser.add_argument('--alpha', type=float, default=0.01)
     parser.add_argument('--lambda_', type=float, default=0.8)
 
 
     parser.add_argument('--reps',type=int, default = 5)
     parser.add_argument('--env',type=int, default = 0)
+    parser.add_argument('--pretrain', type=str2bool, nargs='?',
+                        const=False, default=True)
     args = parser.parse_args()
 
-
-    assert args.policy_type in ["Gaussian", "Deterministic"]
-    assert args.trace_type in ["retrace","qlambda", "treebackup","IS"]
+    trace_list = ["retrace","qlambda", "treebackup","IS"]
+    policy_list = ["Gaussian", "Deterministic"]
+    assert args.policy_type in policy_list
+    assert args.trace_type in trace_list
 
     # Settings
     SEEDS = args.seed
@@ -90,7 +109,7 @@ if __name__ == '__main__':
     lr_alpha = args.lr_alpha
     alpha = args.alpha        # weight of entropy term
 
-    h_max = 1          # upper/lower bound of action
+    h_max = 0.1          # upper/lower bound of action
     batch_size = args.batch_size
     num_episodes = args.episodes
     target_update_interval = args.target_update_interval
@@ -113,13 +132,21 @@ if __name__ == '__main__':
 
     env_num = args.env
 
-    suffix = "SAC_{}_{}_{}_lam{}_{}_win{}_env{}".format(policy_type,
+    pretrain = args.pretrain
+
+    suffix = "SAC_{}_{}_{}_step{}_lam{}_{}_win{}_env{}".format(policy_type,
                 "autotune" if automatic_entropy_tuning and policy_type == "Gaussian" else "",
-                                        trace_type,
+                            trace_type if trace_type in trace_list else "",
+                                        nsteps,
                 lambda_ if trace_type == "retrace" or trace_type == "qlambda" else "",
                                         model_type,
                                         look_back,
                                         env_num)
+    if pretrain and model_type == 'transformer':
+        hidden_size, num_layers, depth, dre, pretrain_encoder_path = load_pretrain_parameters('./pretrain/')
+
+
+
     words = "======= We are training {} =======".format(suffix)
     print("="*len(words))
     print("="*len(words))
@@ -160,7 +187,8 @@ if __name__ == '__main__':
                       feature_num = num_feature,
                       steps = 4320-look_back - nsteps,
                       valid_env = True,
-                      balance = balance)
+                      h_max = h_max,
+                      balance_init = balance)
 
 
     env_val = StockTradingEnv(val_states,
@@ -168,13 +196,16 @@ if __name__ == '__main__':
                               steps = val_steps,
                               feature_num = num_feature,
                               valid_env = True,
-                              balance = balance)
+                              h_max = h_max,
+                              balance_init = balance)
     # ============ Start training ================ #
 
     for i in range(reps):
         memory = ReplayMemory(replay_size,SEEDS)
-        writer = SummaryWriter('runs/{}_{}_rep{}'.format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
-                                                suffix, i))
+        suffix_now = suffix + '_rep{}'.format(i)
+        SAVE_PATH = '{}_{}'.format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
+                                                suffix_now)
+        writer = SummaryWriter('runs/{}'.format(SAVE_PATH))
         agent = SAC(state_dim,
                     env.action_space,
                     look_back = look_back,
@@ -194,14 +225,24 @@ if __name__ == '__main__':
                     lambda_= lambda_,
                     policy_type=policy_type,
                     model_type = model_type,
+                    num_layers = num_layers,
+                    depth = depth,
+                    dropout_rate = dre,
+                    balance_init = balance,
                     num_episodes=num_episodes)
 
+        if pretrain and model_type == 'transformer':
+            agent.load_pretrain_encoder(pretrain_encoder_path)
 
         total_numsteps = 0
         updates = 0
 
 
         for i_episode in itertools.count(1):
+
+            agent.policy.train()
+            agent.critic.train()
+            agent.critic_target.train()
             episode_reward = 0
             episode_steps = 0
             done = False
@@ -212,6 +253,7 @@ if __name__ == '__main__':
 
                 obs_all = []
                 action_all = []
+                action_mean_all = []
                 log_pi_all = []
                 next_obs_all = []
                 rews_all = []
@@ -219,8 +261,8 @@ if __name__ == '__main__':
 
                 for step in range(nsteps):
                     state_ = [state]
-                    action,log_pi = agent.select_action(state_)  # Sample action from policy
-
+                    action,log_pi, action_mean = agent.select_action(state_)  # Sample action from policy
+                    # print('action: ',action, 'log_pi: ', log_pi)
 
                     # print("updates:",updates,"action: ",action[0], 'env steps', env.src.step)
                     next_state, reward, done, _ = env.step(action) # Step
@@ -232,6 +274,7 @@ if __name__ == '__main__':
 
                     obs_all.append(state)
                     action_all.append(action)
+                    action_mean_all.append(action_mean)
                     log_pi_all.append(log_pi)
                     rews_all.append(reward)
                     next_obs_all.append(next_state)
@@ -240,7 +283,7 @@ if __name__ == '__main__':
                     state = next_state
                 # important to make a deep copy of the state
                 if len(obs_all) == nsteps:
-                    memory.push(copy.deepcopy(obs_all), action_all, log_pi_all,
+                    memory.push(copy.deepcopy(obs_all), action_all, action_mean_all, log_pi_all,
                                             rews_all, copy.deepcopy(next_obs_all), done_all) # Append transition to memory
                 if len(memory) > batch_size:
                     # Number of updates per step in environment
@@ -260,9 +303,11 @@ if __name__ == '__main__':
             total_numsteps += 1
             market_gains = np.sum(np.vstack([info['market_gain'] for info in env.infos]),axis=0)[0]
             print("-------------------------------------------")
-            print("Training Episode: {:d}, Avg Episode Reward: {:4f}, Market-Gain: {:4f}, elapase:{:4f}s".format(total_numsteps,
+            print("Training Episode: {:d}, Avg Episode Reward: {:.4e}, Avg Market-Gain: {:.4e}, steps: {}, lr: {:.4e}, elapase:{:4f}s".format(total_numsteps,
                                                                                         episode_reward /episode_steps,
                                                                                         market_gains / episode_steps,
+                                                                                        episode_steps,
+                                                                                        agent.critic_lr_scheduler.optimizer.param_groups[0]['lr'],
                                                                                         time.time() - pre_time))
             print("Critic 1 Loss: {:.4e}, Critic 2 loss: {:.4e}, policy_loss: {:.4f}, ent loss: {:.4f}".format(critic_1_loss,
                                                                                                 critic_2_loss,
@@ -273,36 +318,34 @@ if __name__ == '__main__':
             writer.add_scalar('critic2_loss/train', critic_2_loss, total_numsteps)
             writer.add_scalar('policy_loss/train', policy_loss, total_numsteps)
             writer.add_scalar('ent_loss/train', ent_loss, total_numsteps)
-            if total_numsteps > num_episodes:
-                break
 
 
-            ## validating training every 10 episodoes
+            ## validating training every 5 episodoes
             if i_episode % 5 == 0:
-                avg_reward = 0.
-                episodes = 10
-                for _  in range(episodes):
-                    state, _ = env_val.reset()
+                agent.policy.eval()
+                agent.critic.eval()
+                agent.critic_target.eval()
+                state, _ = env_val.reset()
+                episode_reward = 0
+                done = False
+                while not done:
                     state_ = [state]
-                    episode_reward = 0
-                    done = False
-                    while not done:
-                        action, _ = agent.select_action(state_, evaluate=True)
-                        next_state, reward, done, _ = env_val.step(action)
-                        episode_reward += reward
+                    _, _, action = agent.select_action(state_)
+                    next_state, reward, done, _ = env_val.step(action)
+                    episode_reward += reward
+                    state = next_state
 
+                    # print("action: ",action[0], 'env steps', env_val.src.step,'reward:',reward)
 
-                        state = next_state
-                        # print("action: ",action[0], 'env steps', env_val.src.step)
-                    avg_reward += episode_reward
-                avg_reward /= episodes
-
-                writer.add_scalar('avg_reward/test', avg_reward, i_episode)
+                writer.add_scalar('ttl_reward/test', episode_reward, i_episode)
                 market_gains = np.sum(np.vstack([info['market_gain'] for info in env_val.infos]),axis=0)[0]
                 print("-------------------------------------------")
-                print("Testing Episode: {:d}, Episode Reward: {:4f},Market-Gain: {:4f} ".format(i_episode,
-                                                                                                 avg_reward,
-                                                                                               market_gains))
+                print("Testing Episode: {:d}, Episode Reward: {:.4e},Market-Gain: {:.4e}".format(i_episode,
+                                                                                            episode_reward,
+                                                                                             market_gains))
                 print("-------------------------------------------")
 
-        agent.save_checkpoint(suffix = suffix)
+            if total_numsteps >= num_episodes:
+                break
+
+        agent.save_checkpoint(suffix = SAVE_PATH)

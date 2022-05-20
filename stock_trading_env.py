@@ -76,11 +76,12 @@ class StockTradingSim(object):
                        trading_cost=0.0004,
                        num_stock = 1,
                        balance=100000,
-                       unit = 0.001):
+                       unit = 0.0001):
 
         self.trading_cost = trading_cost
         self.num_stock = num_stock
         self.steps = steps
+        self.balance_init = balance
         self.balance = balance
         self.unit = unit
 
@@ -129,36 +130,12 @@ class StockTradingSim(object):
         updated_total_assets = self.balance + sum(s * p for s, p in zip(self.shares,next_price[:,0]) if s>=0) + \
                                                 sum(s * p for s, p in zip(self.shares,next_price[:,1]) if s<0)
 
-        reward = math.log(updated_total_assets / initial_total_assets) if updated_total_assets > 0 and initial_total_assets > 0 else -1
+        reward = 100*math.log(updated_total_assets / initial_total_assets) if updated_total_assets > 0 and initial_total_assets > 0 else -1
 
 
 
         return self.balance.copy(), self.shares.copy(), reward, updated_total_assets
 
-    def _do_sell_normal(self, action, price, index):
-        action = action[index]
-        shares = self.shares[index]
-        assert action < 0
-
-        action_unit = np.array(action) // np.array(self.unit)
-        action = action_unit * self.unit
-
-        if shares > 0:
-            sell_num_shares = min(abs(action),shares)
-
-            sell_amount = price[index,0] * (sell_num_shares) * (1- self.trading_cost)
-
-            # update balance
-            self.balance += sell_amount
-
-            # update shares
-            self.shares[index] -= sell_num_shares
-            # print('Selling {} shares, Current holding shares: {}'.format(sell_num_shares, self.shares[index]))
-
-        else:
-            sell_num_shares = 0
-
-        return sell_num_shares
 
 
     def _do_short_normal(self, action, price, index):
@@ -169,7 +146,9 @@ class StockTradingSim(object):
         action_unit = np.array(action) // np.array(self.unit)
         action = action_unit * self.unit
         # price 0: selling price 1: buying price
-        max_unit  = (self.balance / (price[index,0]* (1 + self.trading_cost))) // self.unit
+
+        # CONSTRAINTS
+        max_unit  = (self.balance_init / (price[index,0]* (1 + self.trading_cost))) // self.unit
         max_share = max_unit * self.unit
         action = -min(max_share,abs(action))
 
@@ -207,9 +186,10 @@ class StockTradingSim(object):
 
         # TODO: Modify the code to suitable for doing long first when shares <0
         # error may happen here
+
+        # CONSTRAINTS
         max_unit  = (self.balance / (price[index,0]* (1 + self.trading_cost))) // self.unit
         max_share = max_unit * self.unit
-
         action = min(max_share,action)
 
 
@@ -236,38 +216,9 @@ class StockTradingSim(object):
 
 
 
-
-
-    def _do_buy_normal(self, action, price,index):
-        action = action[index]
-        assert action > 0
-
-        action_unit = np.array(action) // np.array(self.unit)
-        action = action_unit * self.unit
-
-        max_unit  = (self.balance / (price[index,1]* (1 + self.trading_cost))) // self.unit
-        max_share = max_unit * self.unit
-
-        buy_num_shares = min(max_share,action)
-
-        buy_amount = price[index,1] * buy_num_shares * (1 + self.trading_cost)
-
-
-        # update balance
-        self.balance = self.balance -  buy_amount
-        assert self.balance >=0, print(self.balance)
-
-        # update shares
-        self.shares[index] += buy_num_shares
-        # print('Buying {} shares, Current holding shares {}'.format(buy_num_shares, self.shares[index]))
-
-
-        return buy_num_shares
-
-
-    def reset(self,balance=100000):
+    def reset(self):
         self.infos = []
-        self.balance = balance
+        self.balance = self.balance_init
         self.shares = np.zeros(self.num_stock)
 
 
@@ -286,7 +237,7 @@ class StockTradingEnv(gym.Env):
                  look_back=50,
                  start_idx=0,
                  feature_num=4,
-                 balance = 100000,
+                 balance_init = 100000,
                  h_max = 1,
                  valid_env = False,
                  verbose = False
@@ -312,7 +263,8 @@ class StockTradingEnv(gym.Env):
         self.start_idx = start_idx
         self.verbose = verbose
         self.h_max = h_max
-        self.balance = balance
+        self.balance_init = balance_init
+        # self.balance = balance
 
         self.src = DataGenerator(history,
                                 steps=steps,
@@ -325,10 +277,10 @@ class StockTradingEnv(gym.Env):
         self.sim = StockTradingSim(steps=steps,
                                    trading_cost=trading_cost,
                                    num_stock=self.num_stock,
-                                   balance=balance)
+                                   balance=balance_init)
         # openai gym attributes
         # action will be the selling/buying shares from -1 to 1 for each asset
-        self.action_space = gym.spaces.Box(-1, 1, shape=(self.num_stock,),
+        self.action_space = gym.spaces.Box(-self.h_max, self.h_max, shape=(self.num_stock,),
                                            dtype=np.float32)
 
         # get the observation space from the data min and max
@@ -372,7 +324,7 @@ class StockTradingEnv(gym.Env):
         self.obs_shares[:,:-1],  self.obs_shares[:,-1:] = temp, share.copy()
 
         info = {}
-        info['market_gain'] = np.log(market_gain)
+        info['market_gain'] = 100*np.log(market_gain)
         info['action_reward'] = reward
         info['total_wealth'] = update_total_asset
         info['balance'] =  balance
@@ -389,7 +341,7 @@ class StockTradingEnv(gym.Env):
     def _reset(self):
         self.infos = []
 
-        self.sim.reset(balance=self.balance)
+        self.sim.reset()
 
         obs, ground_truth_obs = self.src.reset()
 

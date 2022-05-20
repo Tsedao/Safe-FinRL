@@ -7,7 +7,7 @@ from encoders import CausalMHAEncoder, LSTMEncoder
 
 LOG_SIG_MAX = 2
 LOG_SIG_MIN = -20
-epsilon = 1e-6
+epsilon = 1e-7
 
 # Initialize Policy weights
 def weights_init_(m):
@@ -40,41 +40,68 @@ class QNetwork(nn.Module):
                     num_actions,
                     sequence_length,
                     hidden_dim,
-                    type = 'transformer'):
+                    type = 'transformer',
+                    num_layers = 3,
+                    depth = 1,
+                    dropout_rate=0.6):
         super(QNetwork, self).__init__()
-
         # Q1 architecture
         if type == 'transformer':
-            self.encoder1 = CausalMHAEncoder(num_inputs*num_actions, sequence_length, hidden_dim)
-            self.encoder2 = CausalMHAEncoder(num_inputs*num_actions, sequence_length, hidden_dim)
-            next_dim = num_inputs*num_actions*sequence_length
+            self.encoder1 = CausalMHAEncoder((num_inputs-1-num_actions)*num_actions,
+                                                        sequence_length,
+                                                        hidden_dim,
+                                                        lay_nums = num_layers,
+                                                        depth = depth,
+                                                        dropout_rate=dropout_rate)
+            self.encoder2 = CausalMHAEncoder((num_inputs-1-num_actions)*num_actions,
+                                                        sequence_length,
+                                                        hidden_dim,
+                                                        lay_nums = num_layers,
+                                                        depth = depth,
+                                                        dropout_rate=dropout_rate)
+            next_dim = (num_inputs-1-num_actions)*num_actions*sequence_length
         elif type == 'lstm':
-            self.encoder1 = LSTMEncoder(num_inputs*num_actions,hidden_dim)
-            self.encoder2 = LSTMEncoder(num_inputs*num_actions,hidden_dim)
+            self.encoder1 = LSTMEncoder((num_inputs-1-num_actions)*num_actions,hidden_dim)
+            self.encoder2 = LSTMEncoder((num_inputs-1-num_actions)*num_actions,hidden_dim)
             next_dim = hidden_dim*num_actions*sequence_length
         else:
             self.encoder1 = nn.Identity()
             self.encoder2 = nn.Identity()
-            next_dim = num_inputs*num_actions*sequence_length
+            next_dim = (num_inputs-1-num_actions)*num_actions*sequence_length
 
         self.linear0 = nn.Linear(next_dim,hidden_dim)
         self.linear1 = nn.Linear(hidden_dim + num_actions, hidden_dim)
         # self.ln1 = nn.LayerNorm(hidden_dim)
-        self.linear2 = nn.Linear(hidden_dim, hidden_dim)
-        self.linear3 = nn.Linear(hidden_dim, 1)
+        self.linear2 = nn.Linear(hidden_dim + (1+num_actions), hidden_dim)
+        self.linear3 = nn.Linear(hidden_dim, hidden_dim)
+        self.linear3_ = nn.Linear(hidden_dim,1)
+
+        self.dropout1 = nn.Dropout(dropout_rate)
+        self.dropout2 = nn.Dropout(dropout_rate)
 
         # Q2 architecture
 
         self.linear4 = nn.Linear(next_dim,hidden_dim)
         self.linear5 = nn.Linear(hidden_dim + num_actions, hidden_dim)
         # self.ln2 = nn.LayerNorm(hidden_dim)
-        self.linear6 = nn.Linear(hidden_dim, hidden_dim)
-        self.linear7 = nn.Linear(hidden_dim, 1)
+        self.linear6 = nn.Linear(hidden_dim + (1+num_actions), hidden_dim)
+        self.linear7 = nn.Linear(hidden_dim, hidden_dim)
+        self.linear7_ = nn.Linear(hidden_dim, 1)
+
+        self.dropout1_ = nn.Dropout(dropout_rate)
+        self.dropout2_ = nn.Dropout(dropout_rate)
 
         self.apply(weights_init_)
 
     def forward(self, state, action):
         state = state.permute([0,2,1,3])      # change the length to the second dimension
+        num_actions = state.size()[2]
+
+        # get the balance and position from the first serveral dimensions in state
+        balance_position = state[:,-1,:,0:1+num_actions]
+        balance_position = torch.flatten(balance_position, start_dim = 1)
+
+        state = state[:,:,:,1+num_actions:]
         state = state.view(state.size(0),state.size(1), -1)
 
         state1  = self.encoder1(state)
@@ -84,8 +111,15 @@ class QNetwork(nn.Module):
         xu = torch.cat([state1, action], 1)
 
         x1 = F.relu(self.linear1(xu))
-        x1 = F.relu(self.linear2(x1))
-        x1 = self.linear3(x1)
+
+        xuu = torch.cat([x1,balance_position],1)
+        x1 = F.relu(self.linear2(xuu))
+
+        x1 = self.dropout1(x1)
+        x1 = F.relu(self.linear3(x1))
+
+        x1 = self.dropout2(x1)
+        x1 = self.linear3_(x1)
 
 
         #############################################
@@ -96,38 +130,58 @@ class QNetwork(nn.Module):
         xu = torch.cat([state2, action], 1)
 
         x2 = F.relu(self.linear5(xu))
-        x2 = F.relu(self.linear6(x2))
-        x2 = self.linear7(x2)
+
+        xuu = torch.cat([x2,balance_position],1)
+        x2 = F.relu(self.linear6(xuu))
+
+        x2 = self.dropout1_(x2)
+        x2 = F.relu(self.linear7(x2))
+
+        x2 = self.dropout2_(x2)
+        x2 = self.linear7_(x2)
         return x1, x2
 
 
 class GaussianPolicy(nn.Module):
     def __init__(self, num_inputs,
                         num_actions,
-                        hidden_dim,
                         sequence_length,
+                        hidden_dim,
                         type = 'transformer',
+                        num_layers = 3,
+                        depth = 1,
+                        dropout_rate=0.6,
                         action_space=None):
         super(GaussianPolicy, self).__init__()
         if type == 'transformer':
-            self.encoder = CausalMHAEncoder(num_inputs*num_actions, sequence_length, hidden_dim)
-            next_dim = num_inputs*num_actions*sequence_length
+            self.encoder = CausalMHAEncoder((num_inputs-1-num_actions)*num_actions,
+                                               sequence_length,
+                                               hidden_dim,
+                                               lay_nums = num_layers,
+                                               depth = depth,
+                                               dropout_rate = dropout_rate)
+            next_dim = (num_inputs-1-num_actions)*num_actions*sequence_length
         elif type == 'lstm':
-            self.encoder = LSTMEncoder(num_inputs*num_actions,hidden_dim)
+            self.encoder = LSTMEncoder((num_inputs-1-num_actions)*num_actions,hidden_dim)
             next_dim = hidden_dim*num_actions*sequence_length
         else:
             self.encoder = nn.Identity()
-            next_dim = num_inputs*num_actions*sequence_length
+            next_dim = (num_inputs-1-num_actions)*num_actions*sequence_length
         self.linear1 = nn.Linear(next_dim, hidden_dim)
         # self.ln1 = nn.LayerNorm(hidden_dim)
-        self.linear2 = nn.Linear(hidden_dim, hidden_dim)
+        self.linear2 = nn.Linear(hidden_dim+1+num_actions, hidden_dim)
+        self.linear3 = nn.Linear(hidden_dim, hidden_dim)
+        self.dropout1 = nn.Dropout(dropout_rate)
+        self.dropout2 = nn.Dropout(dropout_rate)
         # self.ln2 = nn.LayerNorm(hidden_dim)
 
         # self.ln1 = nn.LayerNorm(hidden_dim)
         # self.ln2 = nn.LayerNorm(hidden_dim)
         self.mean_linear1 = nn.Linear(hidden_dim, hidden_dim)
+        self.dropout_mu = nn.Dropout(dropout_rate)
         self.mean_linear2 = nn.Linear(hidden_dim, num_actions)
         self.log_std_linear1 = nn.Linear(hidden_dim, hidden_dim)
+        self.dropout_std = nn.Dropout(dropout_rate)
         self.log_std_linear2 = nn.Linear(hidden_dim, num_actions)
 
         self.apply(weights_init_)
@@ -145,19 +199,32 @@ class GaussianPolicy(nn.Module):
     def forward(self, state):
 
         state = state.permute([0,2,1,3])      # change the length to the second dimension
+        num_actions = state.size()[2]
+
+        balance_position = state[:,-1,:,0:1+num_actions]
+        balance_position = torch.flatten(balance_position, start_dim = 1)
+
+        state = state[:,:,:,1+num_actions:]
+
         state = state.view(state.size(0),state.size(1), -1)
 
         state = self.encoder(state)
-
-
         state = torch.flatten(state, start_dim = 1)
 
         x = F.relu(self.linear1(state))
+
+        x = torch.cat([x, balance_position], 1)
         x = F.relu(self.linear2(x))
+        x = self.dropout1(x)
+
+        x = F.relu(self.linear3(x))
+        x = self.dropout2(x)
 
         mean = self.mean_linear1(x)
+        mean = self.dropout_mu(mean)
         mean = self.mean_linear2(mean)
         log_std = self.log_std_linear1(x)
+        log_std = self.dropout_std(log_std)
         log_std = self.log_std_linear2(log_std)
         log_std = torch.clamp(log_std, min=LOG_SIG_MIN, max=LOG_SIG_MAX)
         return mean, log_std
@@ -184,26 +251,37 @@ class GaussianPolicy(nn.Module):
 class DeterministicPolicy(nn.Module):
     def __init__(self, num_inputs,
                        num_actions,
-                       hidden_dim,
                        sequence_length,
+                       hidden_dim,
                        type = 'transformer',
+                       num_layers = 3,
+                       depth = 1,
+                       dropout_rate=0.6,
                        action_space=None):
         super(DeterministicPolicy, self).__init__()
 
         if type == 'transformer':
-            self.encoder = CausalMHAEncoder(num_inputs*num_actions, sequence_length, hidden_dim)
-            next_dim = num_inputs*num_actions*sequence_length
+            self.encoder = CausalMHAEncoder((num_inputs-1-num_actions)*num_actions,
+                                                    sequence_length,
+                                                    hidden_dim,
+                                                    lay_nums = num_layers,
+                                                    depth = depth,
+                                                    dropout_rate=dropout_rate)
+            next_dim = (num_inputs-1-num_actions)*num_actions*sequence_length
         elif type == 'lstm':
-            self.encoder = LSTMEncoder(num_inputs*num_actions,hidden_dim)
+            self.encoder = LSTMEncoder((num_inputs-1-num_actions)*num_actions,hidden_dim)
             next_dim = hidden_dim*num_actions*sequence_length
         else:
             self.encoder = nn.Identity()
-            next_dim = num_inputs*num_actions*sequence_length
+            next_dim = (num_inputs-1-num_actions)*num_actions*sequence_length
 
         self.linear0 = nn.Linear(next_dim, hidden_dim)
         self.linear1 = nn.Linear(hidden_dim, hidden_dim)
-        self.linear2 = nn.Linear(hidden_dim, hidden_dim)
 
+        self.linear2 = nn.Linear(hidden_dim + 1 + num_actions, hidden_dim)
+        self.linear3 = nn.Linear(hidden_dim, hidden_dim)
+
+        self.dropout1 = nn.Dropout(dropout_rate)
         self.mean = nn.Linear(hidden_dim, num_actions)
         self.noise = torch.Tensor(num_actions)
 
@@ -222,6 +300,14 @@ class DeterministicPolicy(nn.Module):
 
     def forward(self, state):
         state = state.permute([0,2,1,3])      # change the length to the second dimension
+
+        num_actions = state.size()[2]
+
+        balance_position = state[:,-1,:,0:1+num_actions]
+        balance_position = torch.flatten(balance_position, start_dim = 1)
+
+        state = state[:,:,:,1+num_actions:]
+
         state = state.view(state.size(0),state.size(1), -1)
 
         state = self.encoder(state)
@@ -230,7 +316,11 @@ class DeterministicPolicy(nn.Module):
 
         state = F.relu(self.linear0(state))
         x = F.relu(self.linear1(state))
+
+        x = torch.cat([x, balance_position], 1)
         x = F.relu(self.linear2(x))
+        x = self.dropout1(x)
+        x = F.relu(self.linear3(x))
         mean = torch.tanh(self.mean(x)) * self.action_scale + self.action_bias
         return mean
 
