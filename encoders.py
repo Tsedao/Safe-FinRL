@@ -135,9 +135,9 @@ class CausalMHABlock(nn.Module):
 class CausalMHAEncoder(nn.Module):
     def __init__(self, hidden_size,
                         seq_len,
-                        filter_size,
-                        lay_nums = 3,
-                        depth = 2,
+                        filter_size = 512,
+                        lay_nums = 4,
+                        depth = 1,
                         dropout_rate=0.6):
         """
         Args:

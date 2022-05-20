@@ -1,4 +1,5 @@
 import os
+import math
 import copy
 import torch
 import torch.nn.functional as F
@@ -34,6 +35,9 @@ class SAC(object):
                       policy_type = "Gaussian",
                       trace_type = "retrace",
                       model_type = "lstm",
+                      num_layers = 3,
+                      depth = 1,
+                      dropout_rate = 0.6,
                       num_episodes = 1000,
                       num_iteration = 1440,
                       policy_delay = 1,
@@ -95,6 +99,7 @@ class SAC(object):
 
         self.policy_type = policy_type
         self.trace_type =  trace_type
+        self.model_type = model_type
 
         self.target_update_interval = target_update_interval
         self.automatic_entropy_tuning = automatic_entropy_tuning
@@ -106,24 +111,35 @@ class SAC(object):
                                 action_space.shape[0],
                                 look_back,
                                 hidden_size,
-                                model_type).to(device=self.device)
+                                model_type,
+                                num_layers = num_layers,
+                                depth = depth,
+                                dropout_rate = dropout_rate).to(device=self.device)
         self.critic_optim = Adam(self.critic.parameters(), lr=lr_critic,weight_decay=weight_decay)
         # self.critic_lr_scheduler = CosineAnnealingWarmRestarts(self.critic_optim, T_0=10,T_mult=1,eta_min=0)
 
-        self.critic_lr_scheduler = ExponentialLR(self.critic_optim, gamma=0.996)
+        self.critic_lr_scheduler = ExponentialLR(self.critic_optim, gamma=0.999)
         self.critic_target = QNetwork(state_space,
                                     action_space.shape[0],
                                     look_back,
                                     hidden_size,
-                                    model_type).to(self.device)
+                                    model_type,
+                                    num_layers = num_layers,
+                                    depth =depth,
+                                    dropout_rate = dropout_rate).to(self.device)
         hard_update(self.critic_target, self.critic)
 
         if self.policy_type == "Gaussian":
             # Target Entropy = −dim(A) (e.g. , -6 for HalfCheetah-v2) as given in the paper
             if self.automatic_entropy_tuning is True:
-                self.target_entropy = -torch.prod(torch.Tensor(action_space.shape).to(self.device)).item()
+                if self.model_type == 'transformer':
+                    self.target_entropy = -20
+                else:
+                    # self.target_entropy = -torch.prod(torch.Tensor(action_space.shape).to(self.device)).item() - 1
+                    self.target_entropy = -20
                 # self.target_entropy = -6
-                self.log_alpha = torch.zeros(1, requires_grad=True, device=self.device)
+                log_alpha = math.log(alpha)
+                self.log_alpha = torch.tensor(log_alpha, requires_grad=True).to(self.device)
                 self.alpha_optim = Adam([self.log_alpha], lr=lr_alpha)
 
             self.policy = GaussianPolicy(state_space,
@@ -131,7 +147,10 @@ class SAC(object):
                                         look_back,
                                         hidden_size,
                                         model_type,
-                                        action_space).to(self.device)
+                                        num_layers = num_layers,
+                                        depth = depth,
+                                        dropout_rate = dropout_rate,
+                                        action_space = action_space).to(self.device)
 
             self.policy_optim = Adam(self.policy.parameters(), lr=lr_actor, weight_decay=weight_decay)
 
@@ -144,27 +163,29 @@ class SAC(object):
                                             look_back,
                                             hidden_size,
                                             model_type,
-                                            action_space).to(self.device)
+                                            action_space,
+                                            num_layers = num_layers,
+                                            depth = depth,
+                                            dropout_rate = dropout_rate,
+                                            action_space = action_space).to(self.device)
             self.policy_optim = Adam(self.policy.parameters(), lr=lr_actor,weight_decay=weight_decay)
         else:
             raise NotImplementedError
         # self.policy_lr_scheduler = CosineAnnealingWarmRestarts(self.policy_optim, T_0=num_episodes,T_mult=1, eta_min=0)
-        self.policy_lr_scheduler = ExponentialLR(self.policy_optim, gamma=0.9996)
+        self.policy_lr_scheduler = ExponentialLR(self.policy_optim, gamma=0.996)
 
 
-    def select_action(self, state, evaluate=False):
+    def select_action(self, state):
         state =  self.normalize(state)
         state = torch.FloatTensor(state).to(self.device)
-        if evaluate is False:
-            action, log_pi, _ = self.policy.sample(state)
 
-        else:
-            _, log_pi, action = self.policy.sample(state)
+        action, log_pi, action_mean = self.policy.sample(state)
+
         if self.policy_type == "Deterministic":
             log_pi = log_pi.detach().cpu().numpy()
         else:
             log_pi = log_pi.detach().cpu().numpy()[0]
-        return action.detach().cpu().numpy()[0], log_pi
+        return action.detach().cpu().numpy()[0], log_pi, action_mean.detach().cpu().numpy()[0]
 
     def normalize(self, state_batch):
         """
@@ -214,7 +235,7 @@ class SAC(object):
 
     def update_parameters(self, memory, batch_size, updates):
         # Sample a batch from memory
-        state_batch_, action_batch_, log_pi_batch_, reward_batch_, next_state_batch_, mask_batch_ = memory.sample(batch_size=batch_size)
+        state_batch_, action_batch_, action_mean_batch_, log_pi_batch_, reward_batch_, next_state_batch_, mask_batch_ = memory.sample(batch_size=batch_size)
         # print("action_batch",action_batch)
         # print("state_batch",state_batch)
         state_batch = state_batch_[:,-1,:]
@@ -239,14 +260,13 @@ class SAC(object):
             qf1_final_target = qf1_next_target - self.alpha * next_state_log_pi
             qf2_final_target = qf2_next_target - self.alpha * next_state_log_pi
 
-            q1_lambda  = reward_batch + mask_batch * self.gamma * (qf1_final_target) - \
-                     self.alpha * next_state_log_pi
-            q2_lambda  = reward_batch + mask_batch * self.gamma * (qf2_final_target) - \
-                     self.alpha * next_state_log_pi
+            q1_lambda  = reward_batch + mask_batch * self.gamma * (qf1_final_target)
+            q2_lambda  = reward_batch + mask_batch * self.gamma * (qf2_final_target)
 
         for i in range(2,self.nsteps+1):
             state_batch = state_batch_[:,-i,:]
             action_batch = action_batch_[:,-i,:]
+            action_mean_batch = action_mean_batch_[:,-i,:]
             log_pi_batch = log_pi_batch_[:,-i,:]
             reward_batch = reward_batch_[:,-i]
             next_state_batch = next_state_batch_[:,-i,:]
@@ -260,12 +280,15 @@ class SAC(object):
 
             next_state_batch = torch.FloatTensor(next_state_batch).to(self.device)
             action_batch = torch.FloatTensor(action_batch).to(self.device)
+            action_mean_batch = torch.FloatTensor(action_mean_batch).to(self.device)
             log_pi_batch = torch.FloatTensor(log_pi_batch).to(self.device)
             reward_batch = torch.FloatTensor(reward_batch).to(self.device).unsqueeze(1)
             mask_batch = torch.FloatTensor(1-mask_batch).to(self.device).unsqueeze(1)
 
             with torch.no_grad():
                 next_state_action, next_state_log_pi, _ = self.policy.sample(next_state_batch)
+                if self.trace_type == 'qlambda':
+                    next_state_action = self.lambda_ * next_state_batch + (1-self.lambda_) * action_mean_batch
                 qf1_next_target, qf2_next_target = self.critic_target(next_state_batch, next_state_action)
                 rho_i = torch.exp(next_state_log_pi - log_pi_batch)
 
@@ -284,12 +307,12 @@ class SAC(object):
                 else:
                     raise NotImplementedError
 
-                q1_lambda = reward_batch + mask_batch * self.gamma * qf1_next_target - \
-                         self.alpha * next_state_log_pi + self.gamma * trace_i * \
+                q1_lambda = reward_batch + mask_batch * self.gamma * (qf1_next_target - \
+                         self.alpha * next_state_log_pi) + self.gamma * trace_i * \
                            (q1_lambda - qf1_next_target + self.alpha * next_state_log_pi)
 
-                q2_lambda = reward_batch + mask_batch * self.gamma * qf2_next_target - \
-                         self.alpha * next_state_log_pi + self.gamma * trace_i * \
+                q2_lambda = reward_batch + mask_batch * self.gamma * (qf2_next_target - \
+                         self.alpha * next_state_log_pi) + self.gamma * trace_i * \
                           (q2_lambda - qf2_next_target + self.alpha * next_state_log_pi)
 
         with torch.no_grad():
@@ -313,6 +336,7 @@ class SAC(object):
 
         qf1_pi, qf2_pi = self.critic(state_batch, pi)
         min_qf_pi = torch.min(qf1_pi, qf2_pi)
+        # print(self.alpha)
         policy_loss = ((self.alpha * log_pi) - min_qf_pi).mean() # Jπ = 𝔼st∼D,εt∼N[α * logπ(f(εt;st)|st) − Q(st,f(εt;st))]
 
         # print('min_qf_pi',min_qf_pi,"state", state_batch)
@@ -357,7 +381,7 @@ class SAC(object):
 
     # Load model parameters
     def load_checkpoint(self, ckpt_path, evaluate=False):
-        print('Loading models from {}'.format(ckpt_path))
+        print('Loading model parameters from {}'.format(ckpt_path))
         if ckpt_path is not None:
             checkpoint = torch.load(ckpt_path)
             self.policy.load_state_dict(checkpoint['policy_state_dict'])
@@ -374,3 +398,17 @@ class SAC(object):
                 self.policy.train()
                 self.critic.train()
                 self.critic_target.train()
+
+    def load_pretrain_encoder(self, pretrain_encoder_path):
+        print('Loading encoder parameters from {}'.format(pretrain_encoder_path))
+        weights = torch.load(pretrain_encoder_path,
+            map_location=torch.device(self.device))
+        new_weights = {k: weights['encoder.'+k] for k, _ in self.policy.encoder.state_dict().items()}
+
+        self.policy.encoder.load_state_dict(new_weights)
+
+        self.critic.encoder1.load_state_dict(new_weights)
+        self.critic.encoder2.load_state_dict(new_weights)
+
+        self.critic_target.encoder1.load_state_dict(new_weights)
+        self.critic_target.encoder2.load_state_dict(new_weights)

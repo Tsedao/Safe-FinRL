@@ -147,10 +147,10 @@ class StockTradingSim(object):
         action = action_unit * self.unit
         # price 0: selling price 1: buying price
 
-        ## CONSTRAINTS
-        # max_unit  = (self.balance_init / (price[index,0]* (1 + self.trading_cost))) // self.unit
-        # max_share = max_unit * self.unit
-        # action = -min(max_share,abs(action))
+        # CONSTRAINTS
+        max_unit  = (self.balance_init / (price[index,0]* (1 + self.trading_cost))) // self.unit
+        max_share = max_unit * self.unit
+        action = -min(max_share,abs(action))
 
         # action [-1]  shares [0.5]
         short_position = abs(max(min(action + shares,0),action))
@@ -187,10 +187,10 @@ class StockTradingSim(object):
         # TODO: Modify the code to suitable for doing long first when shares <0
         # error may happen here
 
-        ## CONSTRAINTS
-        # max_unit  = (self.balance / (price[index,0]* (1 + self.trading_cost))) // self.unit
-        # max_share = max_unit * self.unit
-        # action = min(max_share,action)
+        # CONSTRAINTS
+        max_unit  = (self.balance / (price[index,0]* (1 + self.trading_cost))) // self.unit
+        max_share = max_unit * self.unit
+        action = min(max_share,action)
 
 
         # action 1 shares [-0.5]

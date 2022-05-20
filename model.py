@@ -40,12 +40,25 @@ class QNetwork(nn.Module):
                     num_actions,
                     sequence_length,
                     hidden_dim,
-                    type = 'transformer'):
+                    type = 'transformer',
+                    num_layers = 3,
+                    depth = 1,
+                    dropout_rate=0.6):
         super(QNetwork, self).__init__()
         # Q1 architecture
         if type == 'transformer':
-            self.encoder1 = CausalMHAEncoder((num_inputs-1-num_actions)*num_actions, sequence_length, hidden_dim)
-            self.encoder2 = CausalMHAEncoder((num_inputs-1-num_actions)*num_actions, sequence_length, hidden_dim)
+            self.encoder1 = CausalMHAEncoder((num_inputs-1-num_actions)*num_actions,
+                                                        sequence_length,
+                                                        hidden_dim,
+                                                        lay_nums = num_layers,
+                                                        depth = depth,
+                                                        dropout_rate=dropout_rate)
+            self.encoder2 = CausalMHAEncoder((num_inputs-1-num_actions)*num_actions,
+                                                        sequence_length,
+                                                        hidden_dim,
+                                                        lay_nums = num_layers,
+                                                        depth = depth,
+                                                        dropout_rate=dropout_rate)
             next_dim = (num_inputs-1-num_actions)*num_actions*sequence_length
         elif type == 'lstm':
             self.encoder1 = LSTMEncoder((num_inputs-1-num_actions)*num_actions,hidden_dim)
@@ -63,6 +76,9 @@ class QNetwork(nn.Module):
         self.linear3 = nn.Linear(hidden_dim, hidden_dim)
         self.linear3_ = nn.Linear(hidden_dim,1)
 
+        self.dropout1 = nn.Dropout(dropout_rate)
+        self.dropout2 = nn.Dropout(dropout_rate)
+
         # Q2 architecture
 
         self.linear4 = nn.Linear(next_dim,hidden_dim)
@@ -71,6 +87,9 @@ class QNetwork(nn.Module):
         self.linear6 = nn.Linear(hidden_dim + (1+num_actions), hidden_dim)
         self.linear7 = nn.Linear(hidden_dim, hidden_dim)
         self.linear7_ = nn.Linear(hidden_dim, 1)
+
+        self.dropout1_ = nn.Dropout(dropout_rate)
+        self.dropout2_ = nn.Dropout(dropout_rate)
 
         self.apply(weights_init_)
 
@@ -95,7 +114,11 @@ class QNetwork(nn.Module):
 
         xuu = torch.cat([x1,balance_position],1)
         x1 = F.relu(self.linear2(xuu))
+
+        x1 = self.dropout1(x1)
         x1 = F.relu(self.linear3(x1))
+
+        x1 = self.dropout2(x1)
         x1 = self.linear3_(x1)
 
 
@@ -110,7 +133,11 @@ class QNetwork(nn.Module):
 
         xuu = torch.cat([x2,balance_position],1)
         x2 = F.relu(self.linear6(xuu))
+
+        x2 = self.dropout1_(x2)
         x2 = F.relu(self.linear7(x2))
+
+        x2 = self.dropout2_(x2)
         x2 = self.linear7_(x2)
         return x1, x2
 
@@ -121,10 +148,18 @@ class GaussianPolicy(nn.Module):
                         sequence_length,
                         hidden_dim,
                         type = 'transformer',
+                        num_layers = 3,
+                        depth = 1,
+                        dropout_rate=0.6,
                         action_space=None):
         super(GaussianPolicy, self).__init__()
         if type == 'transformer':
-            self.encoder = CausalMHAEncoder((num_inputs-1-num_actions)*num_actions, sequence_length, hidden_dim)
+            self.encoder = CausalMHAEncoder((num_inputs-1-num_actions)*num_actions,
+                                               sequence_length,
+                                               hidden_dim,
+                                               lay_nums = num_layers,
+                                               depth = depth,
+                                               dropout_rate = dropout_rate)
             next_dim = (num_inputs-1-num_actions)*num_actions*sequence_length
         elif type == 'lstm':
             self.encoder = LSTMEncoder((num_inputs-1-num_actions)*num_actions,hidden_dim)
@@ -136,13 +171,17 @@ class GaussianPolicy(nn.Module):
         # self.ln1 = nn.LayerNorm(hidden_dim)
         self.linear2 = nn.Linear(hidden_dim+1+num_actions, hidden_dim)
         self.linear3 = nn.Linear(hidden_dim, hidden_dim)
+        self.dropout1 = nn.Dropout(dropout_rate)
+        self.dropout2 = nn.Dropout(dropout_rate)
         # self.ln2 = nn.LayerNorm(hidden_dim)
 
         # self.ln1 = nn.LayerNorm(hidden_dim)
         # self.ln2 = nn.LayerNorm(hidden_dim)
         self.mean_linear1 = nn.Linear(hidden_dim, hidden_dim)
+        self.dropout_mu = nn.Dropout(dropout_rate)
         self.mean_linear2 = nn.Linear(hidden_dim, num_actions)
         self.log_std_linear1 = nn.Linear(hidden_dim, hidden_dim)
+        self.dropout_std = nn.Dropout(dropout_rate)
         self.log_std_linear2 = nn.Linear(hidden_dim, num_actions)
 
         self.apply(weights_init_)
@@ -176,11 +215,16 @@ class GaussianPolicy(nn.Module):
 
         x = torch.cat([x, balance_position], 1)
         x = F.relu(self.linear2(x))
+        x = self.dropout1(x)
+
         x = F.relu(self.linear3(x))
+        x = self.dropout2(x)
 
         mean = self.mean_linear1(x)
+        mean = self.dropout_mu(mean)
         mean = self.mean_linear2(mean)
         log_std = self.log_std_linear1(x)
+        log_std = self.dropout_std(log_std)
         log_std = self.log_std_linear2(log_std)
         log_std = torch.clamp(log_std, min=LOG_SIG_MIN, max=LOG_SIG_MAX)
         return mean, log_std
@@ -210,11 +254,19 @@ class DeterministicPolicy(nn.Module):
                        sequence_length,
                        hidden_dim,
                        type = 'transformer',
+                       num_layers = 3,
+                       depth = 1,
+                       dropout_rate=0.6,
                        action_space=None):
         super(DeterministicPolicy, self).__init__()
 
         if type == 'transformer':
-            self.encoder = CausalMHAEncoder((num_inputs-1-num_actions)*num_actions, sequence_length, hidden_dim)
+            self.encoder = CausalMHAEncoder((num_inputs-1-num_actions)*num_actions,
+                                                    sequence_length,
+                                                    hidden_dim,
+                                                    lay_nums = num_layers,
+                                                    depth = depth,
+                                                    dropout_rate=dropout_rate)
             next_dim = (num_inputs-1-num_actions)*num_actions*sequence_length
         elif type == 'lstm':
             self.encoder = LSTMEncoder((num_inputs-1-num_actions)*num_actions,hidden_dim)
@@ -229,6 +281,7 @@ class DeterministicPolicy(nn.Module):
         self.linear2 = nn.Linear(hidden_dim + 1 + num_actions, hidden_dim)
         self.linear3 = nn.Linear(hidden_dim, hidden_dim)
 
+        self.dropout1 = nn.Dropout(dropout_rate)
         self.mean = nn.Linear(hidden_dim, num_actions)
         self.noise = torch.Tensor(num_actions)
 
@@ -266,6 +319,7 @@ class DeterministicPolicy(nn.Module):
 
         x = torch.cat([x, balance_position], 1)
         x = F.relu(self.linear2(x))
+        x = self.dropout1(x)
         x = F.relu(self.linear3(x))
         mean = torch.tanh(self.mean(x)) * self.action_scale + self.action_bias
         return mean
